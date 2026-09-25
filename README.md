@@ -23,7 +23,7 @@ the PDF you drop, and walks back to its spot whenever there's work to do.
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env      # works as-is: LLM_PROVIDER=offline needs no key
+cp .env.example .env      # works as-is: a blank key runs offline
 python app.py             # http://127.0.0.1:5000
 ```
 
@@ -91,7 +91,7 @@ static/
   app.js               SPA: Upload / Profiles / Library, Excel-style grid, chat
   robot.js             Dot's drawing: SVG rig + procedural animation
   world.js             Dot's body: floating layer, drag/throw physics, wander, fidgets, catch
-  companion.js         mood state machine; swaps to Lottie art if static/art/ has files
+  companion.js         mood state machine and speech
   app.css              base design system
   companion.css        everything above
 data/                  app.db, uploads/, outputs/   (gitignored)
@@ -121,6 +121,7 @@ GET  /api/stats  ·  /api/health
 
 ## Custom art
 
-Dot is drawn in code (`robot.js`) so it needs no assets. To replace it with commissioned animation,
-drop Lottie JSON files into `static/art/` named after the states (`idle.json`, `reading.json`, ...)
-and it switches automatically. See `static/art/README.md`.
+Dot is drawn entirely in code (`static/robot.js`) - an SVG rig posed each frame by `static/world.js`.
+No image or animation assets, nothing to download, and it themes itself from the same CSS variables
+as the rest of the app. To change how it looks, edit the `markup()` function; to change how it moves,
+edit `POSES` and `GESTURES`.

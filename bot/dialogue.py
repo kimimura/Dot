@@ -1,5 +1,4 @@
 import os
-import random
 
 NAME = os.environ.get("COMPANION_NAME", "Dot").strip() or "Dot"
 
@@ -37,15 +36,8 @@ LINES = {
     "unsure_answer": "I'll take that as a change request.",
 }
 
-QUIPS = [
-    "Still here!", "Drop me a PDF.", "I read fast, promise.", "Boop.", "Formats are my favourite.",
-    "Ready when you are.", "I never forget a layout.", "Feed me spreadsheets.",
-]
 
 
 def say(key, **ctx):
     return LINES[key].format(name=NAME, **ctx)
 
-
-def quip():
-    return random.choice(QUIPS)

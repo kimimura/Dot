@@ -26,10 +26,6 @@ OPS_DOC = """Available ops (use column names exactly as they appear in the table
   {"op":"reextract","instruction":"how to read the document differently"}   (use for structural changes: different row granularity, a missed section, wrong table)"""
 
 
-def _path_for(d):
-    return db.UPLOADS / (d["id"] + ".pdf")
-
-
 def _shrink(before, after):
     oc, nc = len(before["columns"]), len(after["columns"])
     orr, nr = len(before["rows"]), len(after["rows"])

@@ -4,7 +4,6 @@ STATE_DEFAULTS = {
     "tokens": [], "structural": {}, "signature": {}, "table": None, "verification": None,
     "hints": [], "history": [], "transcript": [], "candidates": [], "pending_profile_id": None,
     "pending_name": None, "rejected_profile_ids": [], "extra_fields": {}, "duplicate_of": None, "pending": None,
-    "last_reply": None,
 }
 STATE_KEYS = list(STATE_DEFAULTS)
 MAX_UNDO = 10

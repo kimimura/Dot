@@ -1,0 +1,6 @@
+flask>=3.0
+waitress>=3.0
+google-genai>=1.0
+pdfplumber>=0.11
+openpyxl>=3.1
+python-dotenv>=1.0

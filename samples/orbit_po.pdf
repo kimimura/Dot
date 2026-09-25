@@ -1,0 +1,70 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 1395 >>
+stream
+BT /F1 18 Tf 50 800 Td (PURCHASE ORDER) Tj ET
+BT /F1 12 Tf 50 776 Td (Orbit Logistics Bhd) Tj ET
+BT /F1 11 Tf 50 746 Td (PO Number: PO-77812) Tj ET
+BT /F1 11 Tf 50 730 Td (Order Date: 01/09/2026) Tj ET
+BT /F1 11 Tf 50 714 Td (Supplier: Delta Parts) Tj ET
+BT /F1 11 Tf 50 698 Td (Deliver To: Warehouse 4) Tj ET
+0.5 w
+50 662 m 550 662 l S
+50 642 m 550 642 l S
+50 622 m 550 622 l S
+50 602 m 550 602 l S
+50 582 m 550 582 l S
+50 662 m 50 582 l S
+150 662 m 150 582 l S
+250 662 m 250 582 l S
+350 662 m 350 582 l S
+450 662 m 450 582 l S
+550 662 m 550 582 l S
+BT /F1 10 Tf 54 648 Td (SKU) Tj ET
+BT /F1 10 Tf 154 648 Td (Product) Tj ET
+BT /F1 10 Tf 254 648 Td (Units) Tj ET
+BT /F1 10 Tf 354 648 Td (Unit Cost) Tj ET
+BT /F1 10 Tf 454 648 Td (Amount) Tj ET
+BT /F1 10 Tf 54 628 Td (S-1) Tj ET
+BT /F1 10 Tf 154 628 Td (Bolt M8) Tj ET
+BT /F1 10 Tf 254 628 Td (200) Tj ET
+BT /F1 10 Tf 354 628 Td (0.50) Tj ET
+BT /F1 10 Tf 454 628 Td (100.00) Tj ET
+BT /F1 10 Tf 54 608 Td (S-2) Tj ET
+BT /F1 10 Tf 154 608 Td (Nut M8) Tj ET
+BT /F1 10 Tf 254 608 Td (200) Tj ET
+BT /F1 10 Tf 354 608 Td (0.25) Tj ET
+BT /F1 10 Tf 454 608 Td (50.00) Tj ET
+BT /F1 10 Tf 54 588 Td (S-3) Tj ET
+BT /F1 10 Tf 154 588 Td (Washer) Tj ET
+BT /F1 10 Tf 254 588 Td (400) Tj ET
+BT /F1 10 Tf 354 588 Td (0.05) Tj ET
+BT /F1 10 Tf 454 588 Td (20.00) Tj ET
+BT /F1 9 Tf 50 60 Td (Thank you for your business - Orbit Logistics Bhd - Terms Net 30) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001688 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1758
+%%EOF

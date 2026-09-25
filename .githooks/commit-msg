@@ -1,0 +1,23 @@
+#!/bin/sh
+msg=$(head -n1 "$1")
+types='feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert'
+
+fail() {
+  echo "$1"
+  echo
+  echo "  format   type(scope): subject"
+  echo "  types    feat fix docs style refactor perf test build ci chore revert"
+  echo "  scope    optional, e.g. fix(profiles):"
+  echo "  subject  starts lowercase, no trailing period, 72 chars max"
+  echo
+  echo "  good     fix: match wrapped cell text when verifying"
+  echo "  good     feat(dot): add drag and throw physics"
+  echo "  yours    $msg"
+  exit 1
+}
+
+echo "$msg" | grep -qE "^($types)(\(.+\))?!?: .+" || fail "Bad or missing type."
+echo "$msg" | grep -qE ": [a-z0-9]" || fail "Subject must start lowercase."
+case "$msg" in *.) fail "Subject must not end with a period." ;; esac
+[ "${#msg}" -le 72 ] || fail "Subject is ${#msg} characters; max is 72."
+exit 0

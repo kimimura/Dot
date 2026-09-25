@@ -1,0 +1,55 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 876 >>
+stream
+BT /F1 18 Tf 50 800 Td (TAX INVOICE) Tj ET
+BT /F1 12 Tf 50 776 Td (Acme Trading Sdn Bhd) Tj ET
+BT /F1 11 Tf 50 746 Td (Invoice No: INV-2026-0107) Tj ET
+BT /F1 11 Tf 50 730 Td (Date: 20/09/2026) Tj ET
+BT /F1 11 Tf 50 714 Td (Customer: Gamma Mart) Tj ET
+BT /F1 11 Tf 50 698 Td (Total: 300.00) Tj ET
+0.5 w
+50 662 m 450 662 l S
+50 642 m 450 642 l S
+50 622 m 450 622 l S
+50 662 m 50 622 l S
+150 662 m 150 622 l S
+250 662 m 250 622 l S
+350 662 m 350 622 l S
+450 662 m 450 622 l S
+BT /F1 10 Tf 54 648 Td (Item) Tj ET
+BT /F1 10 Tf 154 648 Td (Description) Tj ET
+BT /F1 10 Tf 254 648 Td (Qty) Tj ET
+BT /F1 10 Tf 354 648 Td (Price) Tj ET
+BT /F1 10 Tf 54 628 Td (A300) Tj ET
+BT /F1 10 Tf 154 628 Td (Green Widget) Tj ET
+BT /F1 10 Tf 254 628 Td (3) Tj ET
+BT /F1 10 Tf 354 628 Td (100.00) Tj ET
+BT /F1 9 Tf 50 60 Td (Thank you for your business - Acme Trading Sdn Bhd - Terms Net 30) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001168 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1238
+%%EOF

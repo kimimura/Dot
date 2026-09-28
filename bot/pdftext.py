@@ -1,4 +1,5 @@
 import hashlib
+import io
 import re
 from dataclasses import dataclass, field
 
@@ -40,15 +41,14 @@ def _norm(word):
     return w
 
 
-def inspect(path):
-    data = open(path, "rb").read()
+def inspect(data):
     if not data.startswith(b"%PDF"):
         raise PdfError("That doesn't look like a PDF.")
     if len(data) > MAX_BYTES:
         raise PdfError(f"That file is over {MAX_BYTES // (1024 * 1024)} MB — too big for me.")
     sha = hashlib.sha256(data).hexdigest()
     try:
-        pdf = pdfplumber.open(path)
+        pdf = pdfplumber.open(io.BytesIO(data))
     except Exception as e:
         raise PdfError(f"I couldn't open that PDF ({e.__class__.__name__}).")
     with pdf:
@@ -108,9 +108,11 @@ def _fingerprint_tokens(page):
     return out
 
 
-def text_of(path):
+def text_of(data):
+    if not data:
+        return ""
     try:
-        with pdfplumber.open(path) as pdf:
+        with pdfplumber.open(io.BytesIO(data)) as pdf:
             return "\n\n".join((p.extract_text() or "") for p in pdf.pages)
     except Exception:
         return ""

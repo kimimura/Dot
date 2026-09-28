@@ -1,9 +1,8 @@
+import io
 import json
 import os
 import re
 import time
-from pathlib import Path
-
 import pdfplumber
 
 OFFLINE = ("offline", "fake", "none")
@@ -80,9 +79,9 @@ class GeminiAdapter:
         self.client = genai.Client(api_key=key)
         self.model = model or self.default_model
 
-    def complete(self, pdf_path, prompt, kind="extract"):
+    def complete(self, pdf, prompt, kind="extract"):
         from google.genai import types
-        part = types.Part.from_bytes(data=Path(pdf_path).read_bytes(), mime_type="application/pdf")
+        part = types.Part.from_bytes(data=pdf, mime_type="application/pdf")
         cfg = types.GenerateContentConfig(response_mime_type="application/json", temperature=0.1)
 
         def send(p):
@@ -113,13 +112,13 @@ class OfflineAdapter:
     def __init__(self, *_):
         self.model = "offline"
 
-    def complete(self, pdf_path, prompt, kind="extract"):
-        return self._chat(prompt) if kind == "chat" else self._extract(pdf_path)
+    def complete(self, pdf, prompt, kind="extract"):
+        return self._chat(prompt) if kind == "chat" else self._extract(pdf)
 
-    def _extract(self, pdf_path):
+    def _extract(self, pdf):
         fields, header, rows, title, issuer = {}, [], [], "", ""
         try:
-            with pdfplumber.open(pdf_path) as pdf:
+            with pdfplumber.open(io.BytesIO(pdf)) as pdf:
                 p1 = pdf.pages[0]
                 lines = [l.strip() for l in (p1.extract_text() or "").splitlines() if l.strip()]
                 title = lines[0] if lines else "Document"

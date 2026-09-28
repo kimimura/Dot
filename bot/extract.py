@@ -219,9 +219,9 @@ def verify(table, text, has_text_layer, edited=None, previous=None):
     return {"cells": cells, "verified": ok, "total": total, "checked": has_text_layer}
 
 
-def run(llm, pdf_path, profile=None, hints=None, instruction=None):
+def run(llm, pdf, profile=None, hints=None, instruction=None):
     prompt = build_prompt(profile, hints, instruction)
-    raw = llm.complete(pdf_path, prompt, kind="extract")
+    raw = llm.complete(pdf, prompt, kind="extract")
     parsed = validate(raw)
     table = flatten(parsed)
     if profile:

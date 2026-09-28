@@ -2,7 +2,7 @@ import difflib
 import json
 import re
 
-from . import db, dialogue, excel, extract, history, ops, pdftext, profiles
+from . import db, dialogue, extract, history, ops, pdftext, profiles
 from .llm import LLMError
 
 YES = re.compile(r"^\s*(y|yes|yeah|yep|yup|correct|right|ok|okay|sure|looks good|that's it|thats it|perfect|good)\b", re.I)
@@ -37,7 +37,7 @@ def _shrink(before, after):
     return None
 
 
-def _apply_revision(conn, llm, d, path, reply, op_list, new_hints, message="", forced=False):
+def _apply_revision(conn, llm, d, pdf, reply, op_list, new_hints, message="", forced=False):
     before = d["table"]
     table, extra = before, d.get("extra_fields")
     hints = list(d["hints"])
@@ -50,7 +50,7 @@ def _apply_revision(conn, llm, d, path, reply, op_list, new_hints, message="", f
     if re_ops:
         prof = profiles.get(conn, d["profile_id"]) if d.get("profile_id") else None
         try:
-            table, sig, extra = extract.run(llm, path, prof, hints, instruction=re_ops[0].get("instruction") or message)
+            table, sig, extra = extract.run(llm, pdf, prof, hints, instruction=re_ops[0].get("instruction") or message)
             edited = set()
             changes.append({"ok": True, "text": "Re-read the document"})
         except LLMError as e:
@@ -61,7 +61,7 @@ def _apply_revision(conn, llm, d, path, reply, op_list, new_hints, message="", f
                 hints.append({"scope": "col", "col": str(o.get("col")), "text": 'Do not extract "%s"' % o.get("col"), "dropped": True})
         table, ch, edited = ops.apply_ops(table, other, edited)
         changes += ch
-    verification = extract.verify(table, pdftext.text_of(path), d["has_text_layer"], edited=edited)
+    verification = extract.verify(table, pdftext.text_of(pdf), d["has_text_layer"], edited=edited)
 
     danger = None if forced else _shrink(before, table)
     if danger:
@@ -137,8 +137,8 @@ def envelope(conn, d, changes=None):
             "n_pages": d["n_pages"], "uploaded_at": d["uploaded_at"], "confirmed_at": d.get("confirmed_at"),
             "has_text_layer": d["has_text_layer"], "profile_id": d.get("profile_id"),
             "profile_name": prof["name"] if prof else None, "duplicate_of": d.get("duplicate_of"),
-            "xlsx_url": f"/api/docs/{d['id']}/download.xlsx" if d.get("xlsx_path") else None,
-            "csv_url": f"/api/docs/{d['id']}/download.csv" if d.get("csv_path") else None,
+            "xlsx_url": f"/api/docs/{d['id']}/download.xlsx" if d.get("table") else None,
+            "csv_url": f"/api/docs/{d['id']}/download.csv" if d.get("table") else None,
             "can_undo": bool(d.get("history")), "hints": d.get("hints", []), "extra_fields": d.get("extra_fields") or {},
             "signature": d.get("signature") or {},
         },
@@ -167,8 +167,8 @@ def _user(d, text, **meta):
 
 # ── upload + identify ────────────────────────────────────────────────────────
 
-def on_upload(conn, path, filename):
-    info = pdftext.inspect(path)
+def on_upload(conn, pdf, filename):
+    info = pdftext.inspect(pdf)
     d = history.create(conn, filename, info)
     _bot(d, "reading", filename=filename)
     dup = history.by_sha(conn, info.sha256, exclude=d["id"])
@@ -331,10 +331,10 @@ def _after_yes(conn, d):
 
 # ── extraction ───────────────────────────────────────────────────────────────
 
-def on_extract(conn, llm, d, path):
+def on_extract(conn, llm, d, pdf):
     prof = profiles.get(conn, d["profile_id"]) if d.get("profile_id") else None
     try:
-        table, sig, extra = extract.run(llm, path, prof, d.get("hints"))
+        table, sig, extra = extract.run(llm, pdf, prof, d.get("hints"))
     except LLMError as e:
         d["stage"], d["error"] = "failed", str(e)
         _bot(d, "failed", error=str(e))
@@ -342,7 +342,7 @@ def on_extract(conn, llm, d, path):
         return d
     d["table"], d["signature"], d["extra_fields"], d["error"] = table, sig, extra, None
     d["history"] = []
-    d["verification"] = extract.verify(table, pdftext.text_of(path), d["has_text_layer"])
+    d["verification"] = extract.verify(table, pdftext.text_of(pdf), d["has_text_layer"])
     _review_prompt(d, first=True)
     history.save(conn, d)
     return d
@@ -368,7 +368,7 @@ def _review_prompt(d, first=False, reply=None, applied=True):
 
 # ── chat ─────────────────────────────────────────────────────────────────────
 
-def on_chat(conn, llm, d, path, message):
+def on_chat(conn, llm, d, pdf, message):
     st = d["stage"]
     msg = message.strip()
     _user(d, msg)
@@ -397,7 +397,7 @@ def on_chat(conn, llm, d, path, message):
         else:
             if st == "confirmed":
                 d["stage"] = "revising"
-            changes = _revise(conn, llm, d, path, msg)
+            changes = _revise(conn, llm, d, pdf, msg)
     else:
         _bot(d, "busy")
     history.save(conn, d)
@@ -468,13 +468,13 @@ Rules:
 - For questions or unrelated chat, answer briefly with no ops."""
 
 
-def _revise(conn, llm, d, path, message):
+def _revise(conn, llm, d, pdf, message):
     if llm is None:
         d["stage"] = "revising"
         _bot(d, text="I can't reach the model right now — no API key is configured. You can still edit cells directly in the sheet.")
         return []
     try:
-        raw = llm.complete(path, _chat_prompt(d, message), kind="chat")
+        raw = llm.complete(pdf, _chat_prompt(d, message), kind="chat")
     except LLMError as e:
         d["stage"] = "revising"
         _bot(d, text=f"I couldn't process that: {e}. Try again, or edit the sheet directly.")
@@ -497,12 +497,12 @@ def _revise(conn, llm, d, path, message):
         _review_prompt(d, reply=reply, applied=False)
         return []
 
-    return _apply_revision(conn, llm, d, path, reply, op_list, new_hints, message)
+    return _apply_revision(conn, llm, d, pdf, reply, op_list, new_hints, message)
 
 
 # ── manual edits ─────────────────────────────────────────────────────────────
 
-def on_ops(conn, d, path, op_list):
+def on_ops(conn, d, pdf, op_list):
     if not d.get("table"):
         return d, [{"ok": False, "text": "nothing to edit yet"}]
     history.snapshot(d)
@@ -512,11 +512,10 @@ def on_ops(conn, d, path, op_list):
             d["hints"].append({"scope": "col", "col": str(o.get("col")), "text": f'Do not extract "{o.get("col")}"', "dropped": True})
     table, changes, edited = ops.apply_ops(d["table"], op_list, edited)
     d["table"] = table
-    d["verification"] = extract.verify(table, pdftext.text_of(path), d["has_text_layer"], edited=edited)
+    d["verification"] = extract.verify(table, pdftext.text_of(pdf), d["has_text_layer"], edited=edited)
     _alias_hints(d, changes)
     if d["stage"] == "confirmed":
-        _write_outputs(d)
-    history.save(conn, d)
+        history.save(conn, d)
     return d, changes
 
 
@@ -528,11 +527,10 @@ def _alias_hints(d, changes):
             d["hints"].append({"scope": "col", "col": r["new"], "alias": r["old"], "text": f'Call the column printed as "{r["old"]}" "{r["new"]}"'})
 
 
-def on_undo(conn, d, path):
+def on_undo(conn, d, pdf):
     ok = history.undo(d)
     if ok and d["stage"] == "confirmed":
-        _write_outputs(d)
-    history.save(conn, d)
+        history.save(conn, d)
     return d, [{"ok": ok, "text": "Undid the last change" if ok else "Nothing to undo"}]
 
 
@@ -560,7 +558,6 @@ def _confirm(conn, d, profile_id=None, new_name=None):
     if prof:
         profiles.learn(conn, prof, d, d["table"], d.get("hints", []), d.get("tokens"), d.get("structural"), d.get("signature"))
         d["profile_id"] = prof["id"]
-    _write_outputs(d)
     d["stage"], d["confirmed_at"], d["pending_name"] = "confirmed", db.now(), None
     if new_name and prof:
         _bot(d, "saved_new", profile=prof["name"])
@@ -570,10 +567,3 @@ def _confirm(conn, d, profile_id=None, new_name=None):
         _bot(d, "saved_only")
 
 
-def _write_outputs(d):
-    base = re.sub(r"[^\w.-]+", "_", d["filename"].rsplit(".", 1)[0])[:60] or "document"
-    xlsx = db.OUTPUTS / f"{d['id']}_{base}.xlsx"
-    csvp = db.OUTPUTS / f"{d['id']}_{base}.csv"
-    excel.write_xlsx(d["table"], xlsx, title=base[:31])
-    excel.write_csv(d["table"], csvp)
-    d["xlsx_path"], d["csv_path"] = str(xlsx), str(csvp)

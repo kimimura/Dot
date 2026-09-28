@@ -1,6 +1,7 @@
 import os
 import threading
 from collections import defaultdict
+from io import BytesIO
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -8,7 +9,8 @@ from flask import Flask, abort, jsonify, render_template, request, send_file
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from bot import db, dialogue, flow, history, llm as llm_mod, profiles  # noqa: E402
+from bot import db, dialogue, excel, flow, history, llm as llm_mod, profiles  # noqa: E402
+from bot.db import DbNotConfigured, Unreachable  # noqa: E402
 from bot.pdftext import PdfError  # noqa: E402
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
@@ -41,8 +43,10 @@ def _lock(doc_id):
     return lk
 
 
-def _pdf_path(doc_id):
-    return db.UPLOADS / f"{doc_id}.pdf"
+def _pdf(conn, doc_id):
+    return db.load_pdf(conn, doc_id)
+
+
 
 
 def _doc_or_404(conn, doc_id):
@@ -67,8 +71,19 @@ def _busy(e):
     return jsonify(error="busy", say=dialogue.say("busy")), 409
 
 
+@app.errorhandler(DbNotConfigured)
+def _nodb(e):
+    return jsonify(error="no database", say=f"My database isn't set up: {e}."), 503
+
+
+@app.errorhandler(Unreachable)
+def _unreachable(e):
+    return jsonify(error="db unreachable",
+                   say="I can't reach my database right now. Your work isn't lost — try again in a moment."), 503
+
+
 @app.errorhandler(PdfError)
-def _pdf(e):
+def _pdf_error(e):
     return jsonify(error="bad pdf", say=str(e)), 400
 
 
@@ -87,7 +102,14 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return jsonify(llm=llm_mod.status(), name=dialogue.NAME)
+    try:
+        conn = db.connect()
+        conn.execute("SELECT 1")
+        conn.close()
+        store = "ok"
+    except Exception as e:
+        store = f"unreachable: {e.__class__.__name__}"
+    return jsonify(llm=llm_mod.status(), name=dialogue.NAME, db=store)
 
 
 # ── documents ────────────────────────────────────────────────────────────────
@@ -99,17 +121,13 @@ def upload():
         return jsonify(error="no file", say="Drop a PDF and I'll get started."), 400
     if not f.filename.lower().endswith(".pdf"):
         return jsonify(error="not pdf", say="I only read PDFs."), 400
-    tmp = db.UPLOADS / f"_incoming_{db.new_id()}.pdf"
-    f.save(tmp)
+    data = f.read()
     conn = db.connect()
     try:
-        d = flow.on_upload(conn, tmp, f.filename)
+        d = flow.on_upload(conn, data, f.filename)
+        db.store_pdf(conn, d["id"], data)
         conn.commit()
-        tmp.rename(_pdf_path(d["id"]))
         env = flow.envelope(conn, d)
-    except Exception:
-        tmp.unlink(missing_ok=True)
-        raise
     finally:
         conn.close()
     return jsonify(env)
@@ -136,12 +154,11 @@ def get_doc(doc_id):
 def delete_doc(doc_id):
     conn = db.connect()
     d = _doc_or_404(conn, doc_id)
+    if d.get("profile_id"):
+        profiles.forget(conn, d["profile_id"], doc_id)
     history.delete(conn, doc_id)
     conn.commit()
     conn.close()
-    for p in (_pdf_path(doc_id), d.get("xlsx_path"), d.get("csv_path")):
-        if p:
-            Path(p).unlink(missing_ok=True)
     return jsonify(ok=True)
 
 
@@ -152,12 +169,15 @@ def _run(doc_id, fn):
         try:
             d = _doc_or_404(conn, doc_id)
             result = fn(conn, d)
-            conn.commit()
-            changes = []
-            if isinstance(result, tuple):
-                d, changes = result
-            else:
-                d = result
+            d, changes = result if isinstance(result, tuple) else (result, [])
+            try:
+                conn.commit()
+            except Exception:
+                conn.close()
+                conn = db.connect(tries=4)
+                history.save(conn, d)
+                conn.commit()
+                app.logger.warning("reconnected to save %s", doc_id)
             env = flow.envelope(conn, d, changes)
         finally:
             conn.close()
@@ -178,7 +198,7 @@ def extract_doc(doc_id):
             return d
         if d["stage"] != "extracting":
             return d
-        return flow.on_extract(conn, llm, d, _pdf_path(doc_id))
+        return flow.on_extract(conn, llm, d, _pdf(conn, doc_id))
     return _run(doc_id, fn)
 
 
@@ -197,19 +217,19 @@ def chat(doc_id):
     msg = str(body.get("message") or "").strip()
     if not msg:
         return jsonify(error="empty", say="Say something and I'll help."), 400
-    return _run(doc_id, lambda conn, d: flow.on_chat(conn, llm_mod.get_llm(), d, _pdf_path(doc_id), msg[:2000]))
+    return _run(doc_id, lambda conn, d: flow.on_chat(conn, llm_mod.get_llm(), d, _pdf(conn, doc_id), msg[:2000]))
 
 
 @app.post("/api/docs/<doc_id>/ops")
 def ops_route(doc_id):
     body = request.get_json(silent=True) or {}
     op_list = [o for o in (body.get("ops") or []) if isinstance(o, dict)]
-    return _run(doc_id, lambda conn, d: flow.on_ops(conn, d, _pdf_path(doc_id), op_list))
+    return _run(doc_id, lambda conn, d: flow.on_ops(conn, d, _pdf(conn, doc_id), op_list))
 
 
 @app.post("/api/docs/<doc_id>/undo")
 def undo(doc_id):
-    return _run(doc_id, lambda conn, d: flow.on_undo(conn, d, _pdf_path(doc_id)))
+    return _run(doc_id, lambda conn, d: flow.on_undo(conn, d, _pdf(conn, doc_id)))
 
 
 @app.post("/api/docs/<doc_id>/revise")
@@ -222,19 +242,24 @@ def download(doc_id, ext):
     conn = db.connect()
     d = _doc_or_404(conn, doc_id)
     conn.close()
-    p = d.get("xlsx_path") if ext == "xlsx" else d.get("csv_path") if ext == "csv" else None
-    if not p or not Path(p).exists():
+    if ext not in ("xlsx", "csv") or not d.get("table"):
         abort(404)
     base = Path(d["filename"]).stem
-    return send_file(p, as_attachment=True, download_name=f"{base}.{ext}")
+    buf = excel.xlsx_bytes(d["table"], base) if ext == "xlsx" else excel.csv_bytes(d["table"])
+    mt = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if ext == "xlsx" else "text/csv"
+    return send_file(buf, as_attachment=True, download_name=f"{base}.{ext}", mimetype=mt)
 
 
 @app.get("/api/docs/<doc_id>/pdf")
-def pdf(doc_id):
-    p = _pdf_path(doc_id)
-    if not p.exists():
+def pdf_view(doc_id):
+    conn = db.connect()
+    try:
+        data = db.load_pdf(conn, doc_id)
+    finally:
+        conn.close()
+    if not data:
         abort(404)
-    return send_file(p, mimetype="application/pdf")
+    return send_file(BytesIO(data), mimetype="application/pdf")
 
 
 # ── profiles ─────────────────────────────────────────────────────────────────
@@ -335,29 +360,40 @@ def delete_profile(pid):
 @app.get("/api/stats")
 def stats():
     conn = db.connect()
-    q = lambda sql, *a: conn.execute(sql, a).fetchone()[0]
+    def q(sql, *a):
+        return list(conn.execute(sql, a).fetchone().values())[0]
     out = {
         "documents": q("SELECT COUNT(*) FROM documents"),
         "confirmed": q("SELECT COUNT(*) FROM documents WHERE stage='confirmed'"),
         "drafts": q("SELECT COUNT(*) FROM documents WHERE stage<>'confirmed'"),
         "profiles": q("SELECT COUNT(*) FROM profiles"),
         "rows": q("SELECT COALESCE(SUM(n_rows),0) FROM documents WHERE stage='confirmed'"),
-        "this_week": q("SELECT COUNT(*) FROM documents WHERE uploaded_at >= datetime('now','-7 days','localtime')"),
+        "this_week": q("SELECT COUNT(*) FROM documents WHERE uploaded_at >= ?", db.days_ago(7)),
         "verified_pct": q("SELECT ROUND(AVG(verified_pct),1) FROM documents WHERE verified_pct IS NOT NULL"),
         "recognized": q("SELECT COUNT(*) FROM documents WHERE stage='confirmed' AND profile_id IS NOT NULL"),
     }
     out["by_profile"] = [dict(r) for r in conn.execute(
-        "SELECT p.name, p.times_used AS n, p.last_used_at FROM profiles p ORDER BY p.times_used DESC, p.name LIMIT 8").fetchall()]
+        "SELECT TOP 8 p.name, p.times_used AS n, p.last_used_at FROM profiles p ORDER BY p.times_used DESC, p.name").fetchall()]
     out["by_day"] = [dict(r) for r in conn.execute(
-        "SELECT substr(uploaded_at,1,10) AS day, COUNT(*) AS n FROM documents"
-        " WHERE uploaded_at >= datetime('now','-14 days','localtime') GROUP BY day ORDER BY day").fetchall()]
+        "SELECT LEFT(uploaded_at,10) AS day, COUNT(*) AS n FROM documents"
+        " WHERE uploaded_at >= ? GROUP BY LEFT(uploaded_at,10) ORDER BY day", (db.days_ago(14),)).fetchall()]
     conn.close()
     return jsonify(out)
 
 
 if __name__ == "__main__":
-    db.init_db()
+    if not db.configured():
+        raise SystemExit(
+            "No database configured. Set these in .env, then run  python migrate_sqlite.py\n"
+            "  DB_SERVER=host-or-ip\n"
+            "  DB_NAME=database\n"
+            "  DB_USER=user\n"
+            "  DB_PASSWORD=secret")
+    try:
+        db.init_db()
+    except Exception as e:
+        raise SystemExit(f"Could not reach the database: {e}")
     from waitress import serve
     port = int(os.environ.get("PORT", "5000"))
-    print(f"{dialogue.NAME} is listening on http://127.0.0.1:{port}  (model: {llm_mod.status()})")
+    print(f"{dialogue.NAME} is listening on http://127.0.0.1:{port}  (model: {llm_mod.status()}, db: {db._env('DB_SERVER')}/{db._env('DB_NAME')})")
     serve(app, host="127.0.0.1", port=port, threads=4)

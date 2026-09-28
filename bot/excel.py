@@ -1,4 +1,5 @@
 import csv
+import io
 import re
 
 from openpyxl import Workbook
@@ -23,7 +24,24 @@ def _coerce(v):
     return int(f) if f == int(f) and "." not in s else f
 
 
-def write_xlsx(table, path, title="Sheet1"):
+def xlsx_bytes(table, title="Sheet1"):
+    buf = io.BytesIO()
+    _build(table, title).save(buf)
+    buf.seek(0)
+    return buf
+
+
+def csv_bytes(table):
+    out = io.StringIO()
+    cols = [c["name"] for c in table["columns"]]
+    w = csv.writer(out)
+    w.writerow(cols)
+    for r in table["rows"]:
+        w.writerow([r.get(c, "") for c in cols])
+    return io.BytesIO(out.getvalue().encode("utf-8-sig"))
+
+
+def _build(table, title="Sheet1"):
     wb = Workbook()
     ws = wb.active
     ws.title = title[:31] or "Sheet1"
@@ -44,13 +62,6 @@ def write_xlsx(table, path, title="Sheet1"):
     for i, c in enumerate(cols, start=1):
         width = max([len(c)] + [len(str(r.get(c, ""))) for r in table["rows"][:200]])
         ws.column_dimensions[get_column_letter(i)].width = min(max(width + 2, 10), 50)
-    wb.save(path)
+    return wb
 
 
-def write_csv(table, path):
-    cols = [c["name"] for c in table["columns"]]
-    with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.writer(f)
-        w.writerow(cols)
-        for r in table["rows"]:
-            w.writerow([r.get(c, "") for c in cols])

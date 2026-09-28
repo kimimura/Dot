@@ -26,7 +26,7 @@ def _row_to_profile(r):
 
 
 def list_all(conn):
-    rows = conn.execute("SELECT * FROM profiles ORDER BY name COLLATE NOCASE").fetchall()
+    rows = conn.execute("SELECT * FROM profiles ORDER BY name").fetchall()
     return [_row_to_profile(r) for r in rows]
 
 
@@ -36,7 +36,7 @@ def get(conn, pid):
 
 
 def by_name(conn, name):
-    r = conn.execute("SELECT * FROM profiles WHERE name=? COLLATE NOCASE", (name,)).fetchone()
+    r = conn.execute("SELECT * FROM profiles WHERE LOWER(name)=LOWER(?)", (name,)).fetchone()
     return _row_to_profile(r) if r else None
 
 
@@ -202,3 +202,33 @@ def core_tokens(p, limit=24):
     items = [(t, df) for t, df in fp.get("tokens", {}).items() if df / n >= 0.5]
     items.sort(key=lambda kv: (-kv[1], kv[0]))
     return [t for t, _ in items[:limit]]
+
+
+def rebuild(conn, p, docs):
+    toks = {}
+    for d in docs:
+        for t in set(d.get("tokens") or []):
+            toks[t] = toks.get(t, 0) + 1
+    fp = p["fingerprint"] or {}
+    fp["tokens"] = dict(sorted(toks.items(), key=lambda kv: -kv[1])[:MAX_FP_TOKENS])
+    fp["doc_ids"] = [d["id"] for d in docs]
+    fp["n_docs"] = len(docs)
+    p["fingerprint"] = fp
+    p["times_used"] = len(docs)
+    live = {d["id"] for d in docs}
+    p["examples"] = [e for e in p.get("examples") or [] if e.get("doc_id") in live]
+    n = max(len(docs), 1)
+    for c in p["columns"]:
+        c["seen"] = min(int(c.get("seen", 0) or 0), n)
+    save(conn, p)
+    return p
+
+
+def forget(conn, pid, doc_id):
+    from . import history
+    p = get(conn, pid)
+    if not p or doc_id not in (p["fingerprint"] or {}).get("doc_ids", []):
+        return None
+    rows = conn.execute("SELECT id FROM documents WHERE profile_id=? AND stage='confirmed' AND id<>?", (pid, doc_id)).fetchall()
+    docs = [d for d in (history.get(conn, r["id"]) for r in rows) if d]
+    return rebuild(conn, p, docs)

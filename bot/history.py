@@ -17,7 +17,6 @@ def _row_to_doc(r):
         "n_pages": r["n_pages"], "uploaded_at": r["uploaded_at"], "confirmed_at": r["confirmed_at"],
         "stage": r["stage"], "error": r["error"], "profile_id": r["profile_id"],
         "has_text_layer": bool(r["has_text_layer"]), "n_rows": r["n_rows"], "verified_pct": r["verified_pct"],
-        "xlsx_path": r["xlsx_path"], "csv_path": r["csv_path"],
     }
     for k, v in STATE_DEFAULTS.items():
         d[k] = st.get(k, [] if isinstance(v, list) else ({} if isinstance(v, dict) else v))
@@ -41,7 +40,7 @@ def get(conn, did):
 
 
 def by_sha(conn, sha, exclude=None):
-    r = conn.execute("SELECT * FROM documents WHERE sha256=? AND id<>? ORDER BY uploaded_at DESC LIMIT 1", (sha, exclude or "")).fetchone()
+    r = conn.execute("SELECT TOP 1 * FROM documents WHERE sha256=? AND id<>? ORDER BY uploaded_at DESC", (sha, exclude or "")).fetchone()
     return _row_to_doc(r) if r else None
 
 
@@ -52,9 +51,9 @@ def save(conn, d):
     pct = round(100.0 * ver["verified"] / ver["total"], 1) if ver.get("checked") and ver.get("total") else None
     conn.execute(
         "UPDATE documents SET filename=?, stage=?, error=?, profile_id=?, confirmed_at=?, n_rows=?, verified_pct=?,"
-        " state_json=?, xlsx_path=?, csv_path=? WHERE id=?",
+        " state_json=? WHERE id=?",
         (d["filename"], d["stage"], d.get("error"), d.get("profile_id"), d.get("confirmed_at"), n_rows, pct,
-         db.dumps({k: d.get(k) for k in STATE_KEYS}), d.get("xlsx_path"), d.get("csv_path"), d["id"]),
+         db.dumps({k: d.get(k) for k in STATE_KEYS}), d["id"]),
     )
 
 
@@ -64,7 +63,7 @@ def delete(conn, did):
 
 def list_docs(conn, q=None, unfinished=False, limit=500):
     sql = ("SELECT d.id, d.filename, d.uploaded_at, d.confirmed_at, d.stage, d.profile_id, d.n_pages, d.n_rows,"
-           " d.verified_pct, d.has_text_layer, d.xlsx_path, d.csv_path, p.name AS profile_name"
+           " d.verified_pct, d.has_text_layer, p.name AS profile_name"
            " FROM documents d LEFT JOIN profiles p ON p.id=d.profile_id")
     where, args = [], []
     if q:
@@ -75,19 +74,20 @@ def list_docs(conn, q=None, unfinished=False, limit=500):
         args += list(UNFINISHED)
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY d.uploaded_at DESC LIMIT ?"
+    sql += " ORDER BY d.uploaded_at DESC OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY"
     args.append(limit)
     out = []
     for r in conn.execute(sql, args).fetchall():
         d = dict(r)
         d["has_text_layer"] = bool(d["has_text_layer"])
-        d["has_output"] = bool(d["xlsx_path"])
+        d["has_output"] = d["stage"] == "confirmed"
         out.append(d)
     return out
 
 
 def docs_for_profile(conn, pid, limit=20):
-    rows = conn.execute("SELECT id, filename, uploaded_at, confirmed_at, n_rows FROM documents WHERE profile_id=? ORDER BY uploaded_at DESC LIMIT ?", (pid, limit)).fetchall()
+    rows = conn.execute("SELECT id, filename, uploaded_at, confirmed_at, n_rows FROM documents WHERE profile_id=?"
+        " ORDER BY uploaded_at DESC OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY", (pid, limit)).fetchall()
     return [dict(r) for r in rows]
 
 

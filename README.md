@@ -23,20 +23,46 @@ the PDF you drop, and walks back to its spot whenever there's work to do.
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env      # works as-is: a blank key runs offline
+cp .env.example .env
 python app.py             # http://127.0.0.1:5000
 ```
 
-To use a real model, set two things in `.env`:
+## Database
+
+Dot stores documents and profiles in **SQL Server**. Set the connection in `.env`:
+
+```
+DB_SERVER=host-or-ip
+DB_PORT=1433
+DB_NAME=DotDB
+DB_USER=dotuser
+DB_PASSWORD=secret
+DB_DRIVER=ODBC Driver 18 for SQL Server
+DB_TRUST_CERT=yes
+```
+
+Leave `DB_USER` blank to use Windows authentication instead. `DB_TRUST_CERT=yes` is needed for
+servers without a trusted certificate - set it to `no` where the certificate is valid.
+
+The database itself must exist; the app creates its two tables and three indexes on first run,
+and skips them if they are already there.
+Uploaded PDFs and generated spreadsheets stay on disk in `data/uploads` and `data/outputs` - only
+metadata, extracted tables and learned profiles live in the database.
+
+Coming from an earlier SQLite build, `python migrate_sqlite.py` copies everything across. It skips
+rows that are already there, so running it twice is safe.
+
+## The model
+
+Set two things in `.env`:
 
 ```
 LLM_API_KEY=your-google-key
 LLM_MODEL=gemini-3.1-flash-lite
 ```
 
-**Leave `LLM_API_KEY` blank** and the whole app runs offline — fields come from `Key: Value` lines
-and ruled tables, and the chat understands `rename X to Y`, `drop X`, `uppercase X`. Every screen
-and the full learning loop work this way, which is also how the tests run.
+**Leave `LLM_API_KEY` blank** and extraction runs offline - fields come from `Key: Value` lines and
+ruled tables, and the chat understands `rename X to Y`, `drop X`, `uppercase X`.
 
 ## Using a different provider
 
@@ -86,7 +112,7 @@ bot/
   profiles.py          fingerprint, matching, learning
   pdftext.py           PDF inspection (text layer, page-1 tokens, size caps)
   excel.py             xlsx (green header) + csv
-  history.py, db.py    SQLite document store, undo stack
+  history.py, db.py    SQL Server document store, undo stack
 static/
   app.js               SPA: Upload / Profiles / Library, Excel-style grid, chat
   robot.js             Dot's drawing: SVG rig + procedural animation
@@ -94,7 +120,7 @@ static/
   companion.js         mood state machine and speech
   app.css              base design system
   companion.css        everything above
-data/                  app.db, uploads/, outputs/   (gitignored)
+data/                  uploads/, outputs/   (gitignored)
 ```
 
 ## API

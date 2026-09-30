@@ -59,15 +59,28 @@
     clearTimeout(state._st); state._st = setTimeout(() => { if (location.hash === "#/library") views.library(); }, 250);
   });
 
+  function setStatus(el, cls, text, title) {
+    if (!el) return;
+    el.className = "st " + cls;
+    el.lastElementChild.textContent = text;
+    el.title = title || "";
+  }
+
   async function loadHealth() {
     try {
       state.health = await api("GET", "/api/health");
-      const s = $("#llm-status");
       const m = state.health.llm;
       const bad = { missing_key: "no API key", missing_model: "no model set", unknown_provider: "unknown provider" };
-      s.className = "st " + (bad[m] ? "s-held" : m === "offline" ? "s-recv" : "s-ok");
-      s.lastElementChild.textContent = bad[m] || (m === "offline" ? "offline mode" : "model connected");
-    } catch (e) {}
+      setStatus($("#llm-status"), bad[m] ? "s-held" : m === "offline" ? "s-recv" : "s-ok",
+                bad[m] || (m === "offline" ? "offline mode" : "model connected"));
+      const d = state.health.db || "";
+      setStatus($("#db-status"), d === "ok" ? "s-ok" : "s-fail",
+                d === "ok" ? "database connected" : "database unreachable",
+                d === "ok" ? "" : d);
+    } catch (e) {
+      setStatus($("#llm-status"), "s-fail", "app not responding");
+      setStatus($("#db-status"), "s-fail", "app not responding");
+    }
   }
 
   async function loadSideProfiles() {
@@ -604,5 +617,6 @@
 
   // ── boot ───────────────────────────────────────────────────────────────────
   loadHealth().then(() => { loadSideProfiles(); route(); });
+  setInterval(loadHealth, 20000);
   window.addEventListener("hashchange", () => { if (location.hash.startsWith("#/profiles") || location.hash.startsWith("#/library")) loadSideProfiles(); });
 })();

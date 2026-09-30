@@ -1,6 +1,8 @@
 /* Companion app: layout additions, chat, Excel-style grid, companion character, profiles, library dashboard. */
 .side-foot { margin-top: auto; padding: 12px 16px 16px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .side-foot .st { font-size: 12px; }
+.status-stack { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.status-stack .st { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 code { font-family: "SF Mono", Consolas, monospace; font-size: 12px; background: var(--row-alt); padding: 1px 5px; border-radius: 4px; }
 .btn.small { padding: 5px 10px; font-size: 12px; }
 .btn.chip { border-radius: 999px; }

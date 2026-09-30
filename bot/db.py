@@ -181,3 +181,27 @@ def load_pdf(conn, doc_id):
     return bytes(r["pdf_data"]) if r and r["pdf_data"] else None
 
 
+_probe = {"at": 0.0, "result": "unknown"}
+
+
+def probe(ttl=10.0, timeout="3"):
+    now_t = time.time()
+    if now_t - _probe["at"] < ttl:
+        return _probe["result"]
+    old = os.environ.get("DB_TIMEOUT")
+    os.environ["DB_TIMEOUT"] = timeout
+    try:
+        c = pyodbc.connect(conn_str(), autocommit=True, timeout=int(timeout))
+        c.close()
+        _probe["result"] = "ok"
+    except DbNotConfigured as e:
+        _probe["result"] = f"not configured: {e}"
+    except Exception as e:
+        _probe["result"] = "unreachable"
+    finally:
+        if old is None:
+            os.environ.pop("DB_TIMEOUT", None)
+        else:
+            os.environ["DB_TIMEOUT"] = old
+    _probe["at"] = time.time()
+    return _probe["result"]

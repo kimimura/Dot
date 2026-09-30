@@ -102,14 +102,7 @@ def index():
 
 @app.get("/api/health")
 def health():
-    try:
-        conn = db.connect()
-        conn.execute("SELECT 1")
-        conn.close()
-        store = "ok"
-    except Exception as e:
-        store = f"unreachable: {e.__class__.__name__}"
-    return jsonify(llm=llm_mod.status(), name=dialogue.NAME, db=store)
+    return jsonify(llm=llm_mod.status(), name=dialogue.NAME, db=db.probe())
 
 
 # ── documents ────────────────────────────────────────────────────────────────
@@ -391,9 +384,13 @@ if __name__ == "__main__":
             "  DB_PASSWORD=secret")
     try:
         db.init_db()
+        ready = "connected"
     except Exception as e:
-        raise SystemExit(f"Could not reach the database: {e}")
+        ready = f"UNREACHABLE ({str(e).strip()[:70]})"
+        print("  the app will start, but nothing will work until the database is back")
     from waitress import serve
     port = int(os.environ.get("PORT", "5000"))
-    print(f"{dialogue.NAME} is listening on http://127.0.0.1:{port}  (model: {llm_mod.status()}, db: {db._env('DB_SERVER')}/{db._env('DB_NAME')})")
+    print(f"{dialogue.NAME} is listening on http://127.0.0.1:{port}")
+    print(f"  model    {llm_mod.status()}")
+    print(f"  database {db._env('DB_SERVER')}/{db._env('DB_NAME')} - {ready}")
     serve(app, host="127.0.0.1", port=port, threads=4)

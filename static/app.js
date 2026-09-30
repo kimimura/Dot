@@ -26,8 +26,10 @@
     file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
   };
 
+  const avatar = () => (window.Robot && Robot.skin) || "classic";
+
   async function api(method, path, body) {
-    const opts = { method, headers: {} };
+    const opts = { method, headers: { "X-Avatar": avatar() } };
     if (body instanceof FormData) opts.body = body;
     else if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
     const r = await fetch(path, opts);
@@ -46,12 +48,30 @@
 
   // ── shell ──────────────────────────────────────────────────────────────────
   $("#brand-mark").innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="3"/><circle cx="9.5" cy="10" r="1.2" fill="currentColor"/><circle cx="14.5" cy="10" r="1.2" fill="currentColor"/><path d="M9 15q3 2.4 6 0"/></svg>';
-  $("#theme-btn").addEventListener("click", () => {
-    const cur = document.documentElement.getAttribute("data-theme");
-    const dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
-    const next = dark ? "light" : "dark";
+  const avatarSel = $("#avatar-select");
+  if (window.Robot) avatarSel.value = Robot.skin;
+  avatarSel.addEventListener("change", () => {
+    if (!window.Robot) return;
+    const name = Robot.setSkin(avatarSel.value);
+    avatarSel.value = name;
+    if (window.Companion) Companion.status(Companion.line("suitUp"), 1600);
+  });
+
+  const themeSw = $("#theme-switch");
+  const darkPref = matchMedia("(prefers-color-scheme: dark)");
+  const isDark = () => {
+    const t = document.documentElement.getAttribute("data-theme");
+    return t ? t === "dark" : darkPref.matches;
+  };
+  const syncTheme = () => themeSw.setAttribute("aria-checked", String(isDark()));
+  syncTheme();
+  requestAnimationFrame(() => themeSw.classList.add("ready"));
+  darkPref.addEventListener("change", syncTheme);
+  themeSw.addEventListener("click", () => {
+    const next = isDark() ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", next);
     try { localStorage.setItem("theme", next); } catch (e) {}
+    syncTheme();
   });
   $("#search-input").addEventListener("input", e => {
     state.search = e.target.value.trim();
@@ -149,7 +169,7 @@
     renderDropzone();
     chatReset();
     Companion.set("idle");
-    Companion.status(`Hi, I'm ${NAME}. Drop a PDF and I'll read it.`, 4000);
+    Companion.status(Companion.line("greet"), 4000);
     try {
       const { docs } = await api("GET", "/api/docs?unfinished=1");
       if (docs.length) {
@@ -262,11 +282,11 @@
       try {
         const env = await api("GET", `/api/docs/${id}`);
         if (env.doc.stage !== "extracting") { renderEnvelope(env); return; }
-        const r = await fetch(`/api/docs/${id}/extract`, { method: "POST" });
+        const r = await fetch(`/api/docs/${id}/extract`, { method: "POST", headers: { "X-Avatar": avatar() } });
         if (r.ok) { renderEnvelope(await r.json()); return; }
       } catch (err) {}
     }
-    setBusy(false, "confused"); chatAdd("bot", "That took too long — try again from the Library.");
+    setBusy(false, "confused"); chatAdd("bot", Companion.line("timeout"));
   }
 
   async function act(method, path, body) {

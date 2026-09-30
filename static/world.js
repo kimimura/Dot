@@ -88,8 +88,8 @@ const World = (() => {
     const now = performance.now();
     taps = taps.filter(t => now - t < 1600); taps.push(now);
     const n = taps.length;
-    if (n >= 6) { say("Stop that!", 1500); Robot.gesture("annoyed", 1800); taps = []; }
-    else if (n >= 3) { say(n === 3 ? "Hehe!" : "Hahaha, stop!", 1200); Robot.gesture("giggle", 1100); }
+    if (n >= 6) { say(voice("annoyed"), 1500); Robot.gesture("annoyed", 1800); taps = []; }
+    else if (n >= 3) { say(voice(n === 3 ? "tickle" : "tickleMore"), 1200); Robot.gesture("giggle", 1100); }
     else if (onTap) onTap();
   }
 
@@ -134,10 +134,13 @@ const World = (() => {
   }
 
   // ── speech ───────────────────────────────────────────────────────────────
+  const voice = key => (window.Companion ? Companion.line(key) : "");
+
   function say(text, ms) {
     if (!bubble) return;
     bubble.textContent = text; bubble.hidden = false;
-    clearTimeout(bubbleT); if (ms) bubbleT = setTimeout(() => { bubble.hidden = true; }, ms);
+    clearTimeout(bubbleT);
+    if (ms) bubbleT = setTimeout(() => { bubble.hidden = true; }, Math.max(ms, 1500 + text.length * 45));
   }
   function hush() { if (bubble) bubble.hidden = true; }
 
@@ -166,7 +169,7 @@ const World = (() => {
       }
       if (y >= fy) {
         y = fy;
-        if (vy > 260) { Robot.impact(Math.min(1, vy / 1600)); if (vy > 900) { Robot.gesture("dazed", 1400); say(["Oof.", "Ow!", "Whee— oof.", "I'm okay!"][Math.floor(Math.random() * 4)], 1200); } }
+        if (vy > 260) { Robot.impact(Math.min(1, vy / 1600)); if (vy > 900) { Robot.gesture("dazed", 1400); say(voice("fall"), 1200); } }
         vy = Math.abs(vy) < 140 ? 0 : -vy * REST; vx *= 0.75; vrot *= 0.4;
         if (vy === 0) { vx *= 0.9; rot += (0 - rot) * 0.15; if (Math.abs(vx) < 12 && Math.abs(rot) < 2) { vx = 0; rot = 0; vrot = 0; if (mode === "fly") { mode = "roam"; settledAt = now; if (!roamUntil || roamUntil < now) roamUntil = now + 6000 + Math.random() * 8000; if (Robot.gesture_ === "flail") Robot.clearGesture(); } } }
       }

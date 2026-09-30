@@ -18,6 +18,11 @@ app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 
+@app.before_request
+def _persona():
+    dialogue.set_persona(request.headers.get("X-Avatar", "classic"))
+
+
 @app.context_processor
 def _assets():
     root = Path(app.static_folder)

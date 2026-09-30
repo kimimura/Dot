@@ -436,9 +436,9 @@ def _chat_prompt(d, message):
     shown = rows if len(rows) <= 60 else rows[:40]
     view = {"columns": t["columns"], "rows": [{k: v for k, v in r.items() if k != "_doc"} for r in shown]}
     recent = [x for x in d["transcript"][-13:-1]]
-    convo = "\n".join(f"{'User' if x['who'] == 'user' else dialogue.NAME}: {x['text']}" for x in recent)
+    convo = "\n".join(f"{'User' if x['who'] == 'user' else dialogue.persona()['speaker']}: {x['text']}" for x in recent)
     hints = "\n".join(f"  - {h['text']}" for h in d.get("hints", []) if h.get("text")) or "  (none yet)"
-    return f"""You are {dialogue.NAME}, a friendly assistant helping a user correct a spreadsheet extracted from the attached PDF. Never mention being an AI model or which model you are.
+    return f"""{dialogue.persona()['voice']} Never mention being an AI model or which model you are.
 
 CURRENT TABLE ({len(rows)} rows total{'; only the first 40 shown' if len(rows) > 60 else ''}):
 {json.dumps(view, ensure_ascii=False)}
@@ -454,7 +454,7 @@ USER MESSAGE: "{message}"
 {OPS_DOC}
 
 Respond ONLY with JSON:
-{{"reply": "one or two short friendly sentences in first person describing what you did or answering",
+{{"reply": "{dialogue.persona()['reply']}",
   "intent": "edit|question|offtopic|confirm|reject",
   "ops": [ ... ],
   "hints": [{{"scope": "col", "col": "Column Name", "text": "rule for that column"}}, {{"scope": "profile", "text": "general rule"}}]}}

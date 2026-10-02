@@ -34,6 +34,7 @@ const Robot = (() => {
 
   let svg, host = null, el = {}, cur = { ...BASE }, vel = { sx: 0, sy: 0, bodyY: 0 }, state = "idle", enteredAt = 0, raf = null;
   let cursor = null, blinkAt = 0, blinkUntil = 0, mouthClass = "", ext = null, gest = null;
+  let thrust = 0.55, hover = 0;
   let skin = (() => { try { return localStorage.getItem("dot-skin") || "classic"; } catch (e) { return "classic"; } })();
 
   const DEFS = `
@@ -45,6 +46,11 @@ const Robot = (() => {
     <radialGradient id="rb-eye"><stop offset="0" class="e1"/><stop offset="1" class="e2"/></radialGradient>
   </defs>
   <ellipse class="shadow" cx="80" cy="174" rx="36" ry="6"/>`;
+
+  const JET = (x, y) => {
+    const f = (w, l) => `M${x - w} ${y}C${x - w * 1.15} ${y + l * 0.35} ${x - w * 0.5} ${y + l * 0.7} ${x} ${y + l}C${x + w * 0.5} ${y + l * 0.7} ${x + w * 1.15} ${y + l * 0.35} ${x + w} ${y}Z`;
+    return `<g class="jet" data-x="${x}" data-y="${y}"><path class="flame-o" d="${f(6.5, 24)}"/><path class="flame-m" d="${f(4.4, 16)}"/><path class="flame-i" d="${f(2.4, 9)}"/></g>`;
+  };
 
   const FX = `
     <g class="fx">
@@ -109,7 +115,7 @@ ${FX}
 <svg class="bot robot" viewBox="0 0 160 184" aria-hidden="true">${DEFS}
   <g class="rig">
     <g class="legs">
-      <g class="leg-l"><path class="ol" d="M59.60 142.15L61.77 142.42L63.66 144.31L64.47 143.77L67.98 144.04L70.68 144.85L72.84 146.74L73.92 145.93L75.27 146.20L79.32 149.71L79.05 154.30L77.70 155.92L78.51 157.01L78.51 159.71L77.43 161.06L78.24 162.14L78.24 163.76L75.81 166.19L73.38 166.73L60.69 167.00L58.52 166.19L56.09 163.76L56.09 162.41L57.98 160.52L57.71 156.46L58.79 155.11L57.98 154.30L57.71 152.14L57.71 144.04Z"/>
+      <g class="leg-l">${JET(67.3, 164)}<path class="ol" d="M59.60 142.15L61.77 142.42L63.66 144.31L64.47 143.77L67.98 144.04L70.68 144.85L72.84 146.74L73.92 145.93L75.27 146.20L79.32 149.71L79.05 154.30L77.70 155.92L78.51 157.01L78.51 159.71L77.43 161.06L78.24 162.14L78.24 163.76L75.81 166.19L73.38 166.73L60.69 167.00L58.52 166.19L56.09 163.76L56.09 162.41L57.98 160.52L57.71 156.46L58.79 155.11L57.98 154.30L57.71 152.14L57.71 144.04Z"/>
         <path class="pl gold" d="M59.60 155.92L62.31 156.19L64.74 158.90L66.36 159.44L69.06 159.17L71.49 156.73L76.35 156.73L76.89 157.01L76.89 159.71L76.35 160.25L74.19 161.06L63.93 161.06L59.88 160.52L59.33 158.63Z"/>
         <path class="pl gold" d="M59.06 161.60L64.47 162.41L72.30 162.41L76.08 161.87L76.62 162.14L76.62 163.76L75.54 164.57L74.46 165.11L71.76 165.38L60.69 165.38L58.52 164.57L57.71 163.76L57.71 162.41Z"/>
         <path class="pl red" d="M59.60 143.77L61.77 144.04L62.85 145.66L63.66 148.90L63.93 152.68L63.39 153.76L62.31 154.30L59.60 154.30Z"/>
@@ -117,7 +123,7 @@ ${FX}
         <path class="pl red" d="M64.47 145.39L67.98 145.66L71.22 146.74L71.76 147.55L70.41 150.25L69.33 151.60L66.09 151.33L64.74 148.90L64.20 146.74Z"/>
         <path class="pl red" d="M66.09 152.41L68.79 152.95L70.41 155.11L69.87 157.55L69.06 158.36L67.98 158.63L66.09 158.63L64.74 158.09L63.66 156.19L63.66 154.84L64.47 153.49Z"/>
       </g>
-      <g class="leg-r"><path class="ol" d="M100.67 141.61L102.56 141.88L104.18 143.50L104.45 152.95L103.37 154.84L104.45 155.92L104.18 159.98L106.07 161.87L106.34 163.22L103.91 165.65L102.56 166.19L97.96 166.73L90.94 166.73L86.62 166.19L84.19 163.49L84.19 161.87L85.00 161.06L83.92 159.98L83.65 157.28L84.73 155.92L83.11 153.76L82.84 149.71L85.00 147.28L87.43 145.93L89.32 146.20L90.94 144.58L96.07 143.23L97.69 143.50L98.23 144.04Z"/>
+      <g class="leg-r">${JET(95, 164)}<path class="ol" d="M100.67 141.61L102.56 141.88L104.18 143.50L104.45 152.95L103.37 154.84L104.45 155.92L104.18 159.98L106.07 161.87L106.34 163.22L103.91 165.65L102.56 166.19L97.96 166.73L90.94 166.73L86.62 166.19L84.19 163.49L84.19 161.87L85.00 161.06L83.92 159.98L83.65 157.28L84.73 155.92L83.11 153.76L82.84 149.71L85.00 147.28L87.43 145.93L89.32 146.20L90.94 144.58L96.07 143.23L97.69 143.50L98.23 144.04Z"/>
         <path class="pl gold" d="M100.94 155.38L102.83 155.92L102.83 159.44L102.02 159.98L96.07 161.06L87.70 160.79L85.54 159.98L85.27 157.28L85.81 156.73L90.67 156.73L93.10 158.63L95.53 159.17L97.42 158.63L99.85 155.92Z"/>
         <path class="pl gold" d="M101.21 161.06L103.91 161.33L104.72 162.41L104.72 163.22L102.56 164.57L97.96 165.11L89.05 165.11L86.62 164.57L85.81 163.49L85.81 161.87L96.61 162.14Z"/>
         <path class="pl red" d="M87.43 147.55L89.32 148.09L91.48 152.68L91.21 154.30L90.40 155.11L88.24 155.38L85.81 155.38L85.00 154.57L84.46 152.14L84.73 149.17Z"/>
@@ -189,8 +195,8 @@ ${FX}
   };
   let P = BASE_PIVOTS;
 
-  function markup() {
-    return (SKIN_MARKUP[skin] || markupClassic)();
+  function markup(name) {
+    return (SKIN_MARKUP[name || skin] || markupClassic)();
   }
 
   const REQUIRED = [".rig", ".body", ".head", ".arm-l", ".arm-r", ".leg-l", ".leg-r", ".eye-l", ".eye-r",
@@ -211,7 +217,7 @@ ${FX}
     el = { rig: q(".rig"), body: q(".body"), head: q(".head"), armL: q(".arm-l"), armR: q(".arm-r"), legL: q(".leg-l"), legR: q(".leg-r"),
            eyeL: q(".eye-l"), eyeR: q(".eye-r"), pupils: svg.querySelectorAll(".pupil, .spark"), browL: q(".brow-l"), browR: q(".brow-r"),
            glow: q(".antenna-glow"), ball: q(".antenna-ball"), cheeks: svg.querySelectorAll(".cheek"), page: q(".page"), dots: q(".dots"),
-           q: q(".qmark"), zzz: q(".zzz"), zs: svg.querySelectorAll(".z"), shadow: q(".shadow"), leds: svg.querySelectorAll(".led") };
+           q: q(".qmark"), zzz: q(".zzz"), zs: svg.querySelectorAll(".z"), shadow: q(".shadow"), leds: svg.querySelectorAll(".led"), jets: svg.querySelectorAll(".jet") };
     P = PIVOTS[skin] || BASE_PIVOTS;
     svg.dataset.skin = skin;
     svg.setAttribute("data-mouth", mouthClass || cur.mouth);
@@ -309,6 +315,30 @@ ${FX}
       if (ext.mode === "fly") { armL += -110 + Math.sin(t * 15) * 25; armR += 110 - Math.sin(t * 15) * 25; legL += Math.sin(t * 12) * 14; legR -= Math.sin(t * 12) * 14; }
     }
 
+    // Iron Man hovers on boot jets instead of walking
+    let hoverTo = 0;
+    if (skin === "ironman") {
+      const mv = ext && ext.mode;
+      const off = mv === "fly" || mv === "held" || mv === "land";
+      const want = ext && ext.thrust != null ? ext.thrust : off ? 0 : mv === "walk" ? 1 : state === "sleepy" ? 0.35 : state === "happy" ? 0.85 : 0.55;
+      thrust = lerp(thrust, want, want < thrust ? 0.3 : 0.08);
+      hoverTo = off ? 0 : mv === "power" ? 12 * thrust : mv === "soar" ? 12 : 12 + Math.sin(t * 2.2) * 2.5 * m;
+      if (mv === "power") bodyRot += Math.sin(t * 45) * 1.2 * thrust * m;
+      if (mv === "soar") {
+        const lean = ext.lean || 0;
+        legL = cur.legL + lean * 16 + Math.sin(t * 3) * 3 * m; legR = cur.legR + lean * 16 + Math.sin(t * 3 + 1) * 3 * m;
+        armL = cur.armL + Math.abs(lean) * 12; armR = cur.armR - Math.abs(lean) * 12;
+        bodyRot += lean * 3;
+      }
+      if (mv === "walk") {
+        const lean = Math.sign(ext.bodyRot || 0);
+        legL = cur.legL + lean * 12; legR = cur.legR + lean * 12;
+        armL = cur.armL + 8; armR = cur.armR - 8;
+        bodyY = cur.bodyY; bodyRot += lean * 4;
+      }
+    }
+    hover = lerp(hover, hoverTo, 0.1);
+
     // look at cursor
     if (cur.look > 0.05 && cursor && svg) {
       const r = svg.getBoundingClientRect();
@@ -323,7 +353,13 @@ ${FX}
 
     // apply
     const pv = (n, t) => `translate(${P[n][0]} ${P[n][1]}) ${t} translate(${-P[n][0]} ${-P[n][1]})`;
-    el.rig.setAttribute("transform", pv("rig", `scale(${sx.toFixed(3)} ${sy.toFixed(3)})`));
+    el.rig.setAttribute("transform", `translate(0 ${(-hover).toFixed(2)}) ` + pv("rig", `scale(${sx.toFixed(3)} ${sy.toFixed(3)})`));
+    el.jets.forEach((j, i) => {
+      const fl = REDUCED ? 1 : 0.86 + Math.sin(t * 31 + i * 1.7) * 0.09 + Math.sin(t * 53 + i) * 0.05;
+      const jx = j.dataset.x, jy = j.dataset.y;
+      j.setAttribute("transform", `translate(${jx} ${jy}) scale(${(0.6 + thrust * 0.45).toFixed(3)} ${Math.max(0.01, thrust * 1.1 * fl).toFixed(3)}) translate(${-jx} ${-jy})`);
+      j.style.opacity = Math.min(1, thrust * 2.2).toFixed(3);
+    });
     el.body.setAttribute("transform", `translate(0 ${bodyY.toFixed(2)}) ` + pv("body", `rotate(${bodyRot.toFixed(2)})`));
     el.head.setAttribute("transform", `translate(0 ${headY.toFixed(2)}) ` + pv("head", `rotate(${headRot.toFixed(2)})`));
     el.armL.setAttribute("transform", pv("armL", `rotate(${(-armL).toFixed(2)})`));
@@ -348,7 +384,7 @@ ${FX}
     el.zzz.style.opacity = cur.zzz.toFixed(3);
     el.zs.forEach((z, i) => { const ph = (t * 0.6 + i * 0.33) % 1; z.style.opacity = (Math.sin(ph * Math.PI)).toFixed(3); z.setAttribute("transform", `translate(${(ph * 6).toFixed(2)} ${(-ph * 10).toFixed(2)})`); });
     el.leds.forEach((l, i) => l.style.opacity = (0.35 + 0.65 * Math.max(0, Math.sin(t * cur.ledRate * 2 + i * 2.1))).toFixed(3));
-    const lift = Math.max(0, -bodyY) + (ext && ext.lift ? ext.lift : 0);
+    const lift = Math.max(0, -bodyY) + (ext && ext.lift ? ext.lift : 0) + hover * 0.6;
     el.shadow.setAttribute("transform", pv("shadow", `scale(${Math.max(0.3, 1 - lift * 0.03).toFixed(3)} 1)`));
     el.shadow.style.opacity = Math.max(0, 0.35 - lift * 0.012).toFixed(3);
     svg.classList.toggle("eyes-happy", cur.happyEyes > 0.5);

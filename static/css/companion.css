@@ -1,0 +1,82 @@
+/* companion: home spot in the chat column, body in a floating layer */
+.bot-stage { display: flex; align-items: flex-end; gap: 12px; min-height: 160px; padding: 4px 2px; }
+.bot-home { width: 136px; height: 156px; flex: none; }
+#dot-layer { position: fixed; inset: 0; pointer-events: none; z-index: 40; overflow: hidden; }
+#dot-layer .bot-face { position: absolute; left: 0; top: 0; width: 136px; height: 156px; pointer-events: auto; touch-action: none; cursor: grab; will-change: transform; transform-origin: 50% 92%; border-radius: 24px; outline-offset: 4px; user-select: none; -webkit-user-drag: none; }
+#dot-layer .bot-face.held { cursor: grabbing; }
+#dot-layer .bot-face svg { pointer-events: none; }
+.bot-face > svg.bot { width: 100%; height: 100%; overflow: visible; display: block; }
+#dot-layer .bot-bubble { position: absolute; max-width: 220px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; padding: 8px 12px; font-size: 12.5px; color: var(--ink); line-height: 1.4; pointer-events: none; box-shadow: 0 6px 18px rgb(0 0 0 / 10%); }
+#dot-layer .bot-bubble::after { content: ""; position: absolute; left: -6px; top: 14px; width: 10px; height: 10px; background: var(--surface); border-left: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); transform: rotate(45deg); }
+#dot-layer .bot-bubble.flip::after { left: auto; right: -6px; transform: rotate(-135deg); }
+#dot-layer .bot-bubble[hidden] { display: none; }
+.pdf-fly { position: absolute; left: 0; top: 0; width: 26px; height: 32px; margin: -16px 0 0 -13px; pointer-events: none; }
+.pdf-fly svg { width: 100%; height: 100%; fill: var(--surface); stroke: var(--ink); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.pdf-fly svg path + path { fill: none; stroke: var(--ink-3); }
+
+/* the robot */
+.robot {
+  --rb-m1: #f3f5f8; --rb-m2: #c3cad5; --rb-line: #2a3140; --rb-hi: rgb(255 255 255 / 70%);
+  --rb-sc1: #1b2531; --rb-sc2: #0c1218; --rb-glow: #46c2ff; --rb-eye1: #c9f5ff; --rb-eye2: #4fd0ff; --rb-pupil: #062d3b;
+  --rb-cheek: rgb(255 118 128 / 55%); --rb-page: #ffffff; --rb-ink: #8d96a6;
+}
+:root[data-theme="dark"] .robot { --rb-m1: #5b6476; --rb-m2: #333a47; --rb-line: #e8ecf2; --rb-hi: rgb(255 255 255 / 14%); --rb-sc1: #0f151c; --rb-sc2: #04070b; --rb-page: #e6eaf0; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .robot { --rb-m1: #5b6476; --rb-m2: #333a47; --rb-line: #e8ecf2; --rb-hi: rgb(255 255 255 / 14%); --rb-sc1: #0f151c; --rb-sc2: #04070b; --rb-page: #e6eaf0; } }
+.robot .m1 { stop-color: var(--rb-m1); } .robot .m2 { stop-color: var(--rb-m2); }
+.robot .sc1 { stop-color: var(--rb-sc1); } .robot .sc2 { stop-color: var(--rb-sc2); }
+.robot .g1 { stop-color: var(--rb-glow); stop-opacity: .9; } .robot .g2 { stop-color: var(--rb-glow); stop-opacity: 0; }
+.robot .e1 { stop-color: var(--rb-eye1); } .robot .e2 { stop-color: var(--rb-eye2); }
+.robot .shadow { fill: var(--rb-line); opacity: .35; }
+.robot .leg, .robot .foot, .robot .upper, .robot .hand, .robot .torso, .robot .helmet, .robot .ear, .robot .neck { fill: url(#rb-metal); stroke: var(--rb-line); stroke-width: 2; stroke-linejoin: round; }
+.robot .hand { fill: url(#rb-metal2); }
+.robot .torso-hi, .robot .helmet-hi { fill: var(--rb-hi); }
+.robot .panel { fill: var(--rb-sc1); stroke: var(--rb-line); stroke-width: 1.5; }
+.robot .led1 { fill: #57c489; } .robot .led2 { fill: #d6a24a; } .robot .led3 { fill: #e57373; }
+.robot .screen { fill: url(#rb-screen); stroke: var(--rb-line); stroke-width: 2; }
+.robot .antenna { stroke: var(--rb-line); stroke-width: 2.5; stroke-linecap: round; }
+.robot .antenna-ball { fill: var(--rb-glow); stroke: var(--rb-line); stroke-width: 1.5; }
+.robot .antenna-glow { fill: url(#rb-glow); }
+.robot .eyeball { fill: url(#rb-eye); }
+.robot .pupil { fill: var(--rb-pupil); }
+.robot .spark { fill: #fff; opacity: .9; }
+.robot .eye-happy { fill: none; stroke: var(--rb-eye2); stroke-width: 3; stroke-linecap: round; opacity: 0; }
+.robot.eyes-happy .eyeball, .robot.eyes-happy .pupil, .robot.eyes-happy .spark { opacity: 0; }
+.robot.eyes-happy .eye-happy { opacity: 1; }
+.robot .brow { stroke: var(--rb-eye2); stroke-width: 2.5; stroke-linecap: round; opacity: .9; }
+.robot .mouth { fill: none; stroke: var(--rb-eye2); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0; transition: opacity .15s; }
+.robot .m-grin { fill: var(--rb-eye2); }
+.robot[data-mouth="smile"] .m-smile, .robot[data-mouth="flat"] .m-flat, .robot[data-mouth="o"] .m-o, .robot[data-mouth="grin"] .m-grin, .robot[data-mouth="wave"] .m-wave { opacity: 1; }
+.robot .cheek { fill: var(--rb-cheek); opacity: 0; }
+.robot .page { opacity: 0; }
+.robot .page rect { fill: var(--rb-page); stroke: var(--rb-line); stroke-width: 1.8; }
+.robot .page path { fill: none; stroke: var(--rb-ink); stroke-width: 1.6; stroke-linecap: round; }
+.robot .dots { opacity: 0; } .robot .dots circle { fill: var(--rb-line); }
+.robot .qmark { opacity: 0; font: 700 18px Inter, system-ui, sans-serif; fill: var(--rb-glow); }
+.robot .zzz { opacity: 0; } .robot .z { font: 700 12px Inter, system-ui, sans-serif; fill: var(--rb-line); }
+.robot .z2 { font-size: 14px; } .robot .z3 { font-size: 17px; }
+
+/* skins: Iron Man is traced (tools/trace_avatar.py): lines are the .ol outline showing between .pl panels, not strokes */
+.robot[data-skin="ironman"] {
+  --im-red: #cf2f26; --im-dark: #8e2018; --im-gold: #f5c53f;
+  --im-line: #4a120e; --im-glass: #bdf2ff; --im-glint: #f2ffff; --im-arc: #6fe4ff;
+}
+.robot[data-skin="ironman"] .ol { fill: var(--im-line); stroke: none; }
+.robot[data-skin="ironman"] .pl { stroke: none; }
+.robot[data-skin="ironman"] .pl.red { fill: var(--im-red); }
+.robot[data-skin="ironman"] .pl.gold { fill: var(--im-gold); }
+.robot[data-skin="ironman"] .pl.dark { fill: var(--im-dark); }
+.robot[data-skin="ironman"] .pl.glass { fill: var(--im-glass); }
+.robot .jet { filter: drop-shadow(0 0 3px rgb(255 140 40 / 70%)); }
+.robot .flame-o { fill: #ff6a1a; } .robot .flame-m { fill: #ffb42e; } .robot .flame-i { fill: #fff4cf; }
+
+.robot[data-skin="ironman"] .eyeball { fill: var(--im-glass); stroke: none; }
+.robot[data-skin="ironman"] .pupil { fill: var(--im-glint); opacity: .85; }
+.robot[data-skin="ironman"] .eye-happy { fill: none; stroke: var(--im-glass); stroke-width: 3.5; stroke-linecap: round; }
+.robot[data-skin="ironman"] .brow { stroke: var(--im-line); stroke-width: 1.6; opacity: .35; }
+
+.robot[data-skin="ironman"] .antenna-glow { fill: url(#rb-glow); }
+.robot[data-skin="ironman"] .antenna-ball { fill: var(--im-glass); stroke: none; }
+.robot[data-skin="ironman"] .g1 { stop-color: var(--im-arc); stop-opacity: .9; }
+.robot[data-skin="ironman"] .g2 { stop-color: var(--im-arc); stop-opacity: 0; }
+.robot[data-skin="ironman"] .page rect { fill: #f4f1e8; stroke: var(--im-line); stroke-width: 1.8; }
+.robot[data-skin="ironman"] .page path { stroke: #8d96a6; }

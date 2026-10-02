@@ -1,0 +1,49 @@
+/* Excel-style grid */
+.xgrid-panel { --xl: #217346; --xl-2: #1a5c38; --xl-tint: rgb(33 115 70 / 7%); }
+:root[data-theme="dark"] .xgrid-panel { --xl: #2f8f5b; --xl-2: #256f47; --xl-tint: rgb(47 143 91 / 14%); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .xgrid-panel { --xl: #2f8f5b; --xl-2: #256f47; --xl-tint: rgb(47 143 91 / 14%); } }
+.xgrid-panel.flat { border: 0; border-radius: 0; }
+.xgrid-wrap { max-height: calc(100vh - 300px); }
+table.xgrid { width: auto; min-width: 100%; font-size: 12.5px; border-collapse: separate; border-spacing: 0; }
+table.xgrid thead th { padding: 0; border: 0; color: #fff; }
+table.xgrid tr.xg-groups th { background: var(--xl-2); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; padding: 5px 12px; text-align: left; position: sticky; top: 0; z-index: 3; }
+table.xgrid tr.xg-groups th.corner { background: linear-gradient(var(--row-alt), var(--row-alt)), var(--canvas); position: sticky; left: 0; z-index: 4; }
+table.xgrid tr.xg-names th { background: var(--xl); position: sticky; top: 0; z-index: 3; padding: 6px 10px 6px 12px; text-align: left; font-weight: 600; white-space: nowrap; }
+table.xgrid tr.xg-groups + tr.xg-names th { top: 24px; }
+table.xgrid tr.xg-names th.doc { background: var(--xl-2); }
+table.xgrid tr.xg-names th.corner, table.xgrid td.rn { background: linear-gradient(var(--row-alt), var(--row-alt)), var(--canvas); color: var(--ink-3); text-align: right; width: 44px; min-width: 44px; padding: 0 10px 0 6px; font-variant-numeric: tabular-nums; position: sticky; left: 0; z-index: 2; border-right: 1px solid var(--border); }
+table.xgrid tr.xg-names th.corner { z-index: 4; }
+table.xgrid th .th-in { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 300px; flex-wrap: nowrap; }
+table.xgrid th .letter { flex: none; font-size: 10px; font-weight: 500; opacity: .75; font-variant-numeric: tabular-nums; }
+table.xgrid th .name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.xgrid th .colmenu { flex: none; margin-left: auto; border: 0; background: transparent; color: #fff; opacity: 0; padding: 0 4px; border-radius: 4px; font-size: 14px; line-height: 1; cursor: pointer; }
+table.xgrid th:hover .colmenu, table.xgrid th .colmenu:focus-visible { opacity: 1; }
+table.xgrid th .colmenu:hover { background: rgb(255 255 255 / 20%); }
+table.xgrid tbody tr:nth-child(even) { background: var(--xl-tint); }
+table.xgrid tbody tr.doc-start td { border-top: 2px solid var(--xl); }
+table.xgrid td.cell { padding: 7px 12px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; position: relative; vertical-align: middle; }
+table.xgrid td.cell.doc { color: var(--ink-2); }
+table.xgrid td.cell:focus { outline: 2px solid var(--xl); outline-offset: -2px; }
+table.xgrid td.cell.editing { white-space: normal; background: var(--surface); color: var(--ink); }
+table.xgrid td.cell .empty { color: var(--ink-4); }
+table.xgrid td.miss { background: var(--held-bg); }
+table.xgrid td.miss::after, table.xgrid td.edited::after { content: ""; position: absolute; top: 0; right: 0; border: 5px solid transparent; border-top-color: var(--held); border-right-color: var(--held); }
+table.xgrid td.edited::after { border-top-color: var(--ok); border-right-color: var(--ok); }
+table.xgrid td.elsewhere { background: var(--fail-bg); }
+table.xgrid td.elsewhere::after { content: ""; position: absolute; top: 0; right: 0; border: 5px solid transparent; border-top-color: var(--fail); border-right-color: var(--fail); }
+table.xgrid.readonly td.cell { cursor: default; }
+.legend { display: inline-flex; align-items: center; gap: 6px; }
+.legend .lg { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-left: 10px; border: 1px solid var(--border-strong); }
+.legend .lg:first-child { margin-left: 0; }
+.legend .lg.miss { background: var(--held-bg); border-color: var(--held); }
+.legend .lg.elsewhere { background: var(--fail-bg); border-color: var(--fail); }
+.legend .lg.edited { background: color-mix(in srgb, var(--ok) 25%, transparent); border-color: var(--ok); }
+.legend .lg.ok { background: var(--surface); }
+.menu { position: fixed; z-index: 60; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 9px; padding: 5px; display: flex; flex-direction: column; min-width: 190px; box-shadow: 0 8px 24px rgb(0 0 0 / 14%); }
+.menu button { border: 0; background: transparent; text-align: left; padding: 7px 10px; border-radius: 6px; font-size: 13px; color: var(--ink); }
+.menu button:hover:not(:disabled) { background: var(--hover); }
+.menu button:disabled { opacity: .4; cursor: default; }
+.menu button.danger { color: var(--fail); }
+
+/* sheet: loads the next 500 rows when this scrolls into view */
+.xgrid-more { height: 1px; }

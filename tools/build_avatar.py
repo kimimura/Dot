@@ -1,4 +1,4 @@
-# Build-time only: python tools/build_avatar.py trace.json --out avatar.js, then paste into static/robot.js
+# Build-time only: python tools/build_avatar.py trace.json --out avatar.js, then paste into static/js/companion/robot.js
 import argparse
 import json
 

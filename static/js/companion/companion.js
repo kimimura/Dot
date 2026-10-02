@@ -12,6 +12,10 @@ const Companion = (() => {
       tickle: "Hehe!", tickleMore: "Hahaha, stop!", annoyed: "Stop that!",
       fall: ["Oof.", "Ow!", "Whee— oof.", "I'm okay!"],
       suitUp: "Back to Dot.", timeout: "That took too long — try again from the Library.",
+      slow: "Still on it, this one's taking a little longer…",
+      pages: "Reading… {pct}% of {n} pages",
+      cvGreet: "Drop PDFs and I'll turn each one into a CSV.",
+      batchDone: "All done: {n} CSVs ready.",
     },
     ironman: {
       greet: "Tony Stark. Well, the suit. Drop a PDF and I'll take it apart.",
@@ -23,6 +27,10 @@ const Companion = (() => {
       tickle: "Hey, that tickles.", tickleMore: "Okay, okay, stop!", annoyed: "Do that again and I'm calling my lawyers.",
       fall: ["Nailed the landing.", "Flight stabilisers offline.", "That was on purpose.", "I'm fine. Suit's fine."],
       suitUp: "Suit up.", timeout: "That took way too long. Try again from the Library.",
+      slow: "Still on it. Genius takes a minute…",
+      pages: "Scanning… {pct}% of {n} pages",
+      cvGreet: "Drop the PDFs. I'll handle the paperwork.",
+      batchDone: "Done. {n} CSVs, hot off the press.",
     },
   };
 

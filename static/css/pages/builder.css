@@ -1,0 +1,33 @@
+.content.page-upload { overflow: hidden; display: flex; flex-direction: column; padding: 22px 32px 20px; }
+.page-upload .page-head { margin-bottom: 16px; flex: none; }
+.page-upload #notes { flex: none; }
+.page-upload .upload-grid { flex: 1; min-height: 0; align-items: stretch; gap: 22px; }
+.page-upload .sheet-col { min-height: 0; display: flex; flex-direction: column; }
+.page-upload .dropzone { flex: 1; min-height: 0; }
+.page-upload .xgrid-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.page-upload .xgrid-wrap { flex: 1; min-height: 0; max-height: none; }
+.page-upload .panel-head, .page-upload .panel-foot { flex: none; }
+.page-upload .bot-col.detail-col { position: static; height: auto; min-height: 0; }
+.page-upload .chat-log { flex: 1; min-height: 0; overflow-y: auto; }
+.page-upload .chat-options, .page-upload .chat-input { flex: none; }
+@media (max-width: 1060px) {
+  .content.page-upload { overflow-y: auto; display: block; }
+  .page-upload .dropzone { min-height: 320px; }
+  .page-upload .xgrid-wrap { max-height: 60vh; }
+}
+
+/* upload layout */
+.upload-grid { grid-template-columns: 1.55fr 1fr; gap: 28px; }
+.sheet-col { min-width: 0; }
+.bot-col { display: flex; flex-direction: column; gap: 10px; }
+.dropzone { min-height: 420px; display: grid; place-items: center; text-align: center; cursor: pointer; transition: background .12s, border-color .12s; border-style: dashed; }
+.dropzone.over { background: var(--sel); border-color: var(--ink); }
+.dropzone.busy { cursor: default; border-style: solid; }
+.dropzone .empty-state { max-width: 420px; }
+.dropzone .dz-icon svg, .dropzone .empty-state > svg { width: 34px; height: 34px; stroke-width: 1.5; color: var(--ink-4); margin-bottom: 10px; }
+.spin-dot { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--ink-4); border-top-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; margin-right: 6px; }
+
+@media (max-width: 1060px) {
+  .upload-grid { grid-template-columns: 1fr; }
+  .bot-col.detail-col { position: static; height: auto; }
+}

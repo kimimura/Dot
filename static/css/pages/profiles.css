@@ -1,0 +1,46 @@
+/* profile column editor: fixed, predictable widths */
+table.tpl-cols-table { table-layout: fixed; width: 100%; }
+.tpl-cols-table .c-drag  { width: 32px; }
+.tpl-cols-table .c-name  { width: 25%; }
+.tpl-cols-table .c-level { width: 144px; }
+.tpl-cols-table .c-hint  { width: auto; }
+.tpl-cols-table .c-seen  { width: 56px; }
+.tpl-cols-table .c-del   { width: 40px; }
+table.tpl-cols-table th, table.tpl-cols-table td { padding: 7px 8px; vertical-align: middle; }
+table.tpl-cols-table thead th { padding-top: 10px; padding-bottom: 10px; }
+table.tpl-cols-table td.drag-cell, table.tpl-cols-table th.drag-cell { padding-left: 12px; padding-right: 0; }
+table.tpl-cols-table td.del-cell, table.tpl-cols-table th.del-cell { padding-left: 0; padding-right: 12px; text-align: right; }
+table.tpl-cols-table td input[type="text"], table.tpl-cols-table td select { width: 100%; min-width: 0; box-sizing: border-box; }
+/* custom arrow: native select arrows reserve different amounts per browser and clip the label */
+table.tpl-cols-table td select, .tpl-body .new-col-row select {
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  padding: 8px 26px 8px 10px; text-overflow: ellipsis;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b93a1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 8px center; background-size: 13px;
+}
+table.tpl-cols-table tfoot td { border-top: 1px solid var(--border); padding-top: 14px; padding-bottom: 6px; }
+table.tpl-cols-table td.add-cell { text-align: right; padding-right: 12px; padding-left: 8px; white-space: nowrap; }
+table.tpl-cols-table .help { font-size: 11px; color: var(--ink-4); margin-top: 3px; overflow-wrap: anywhere; }
+table.tpl-cols-table td.n { padding-right: 10px; }
+.tpl-body .table-wrap { padding: 0 6px 4px; overflow-x: auto; }
+
+/* profiles */
+.tpl-card.collapsed .tpl-body { display: none; }
+.tpl-head { user-select: none; }
+.tpl-meta { font-size: 12px; color: var(--ink-4); white-space: nowrap; }
+.tpl-body .panel-head { border-top: 1px solid var(--border); }
+.tpl-body .panel-head:first-child { border-top: 0; }
+.hints-list { padding: 14px 18px 16px; }
+.hints-list .field-row:first-child { padding-top: 0; }
+.hints-list .field-row:last-child { padding-bottom: 0; }
+.tpl-body .docs-mini { padding-top: 0; }
+
+.hints-list .field-row .key { width: 40px; color: var(--ink-4); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.hints-list .field-row .sample { width: auto; font-family: inherit; color: var(--ink); font-size: 13px; }
+.docs-mini { display: flex; flex-direction: column; gap: 2px; padding-top: 10px; }
+.doc-mini { display: grid; grid-template-columns: 16px 1fr auto; gap: 10px; align-items: center; padding: 7px 8px; margin: 0 -8px; border-radius: 7px; font-size: 13px; }
+.doc-mini:hover { background: var(--hover); }
+.doc-mini svg { width: 15px; height: 15px; color: var(--ink-4); stroke-width: 1.8; }
+
+/* header side group: count + action */
+.ph-side { display: flex; align-items: center; gap: 10px; }

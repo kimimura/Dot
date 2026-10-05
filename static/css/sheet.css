@@ -26,8 +26,8 @@ table.xgrid td.cell.doc { color: var(--ink-2); }
 table.xgrid td.cell:focus { outline: 2px solid var(--xl); outline-offset: -2px; }
 table.xgrid td.cell.editing { white-space: normal; background: var(--surface); color: var(--ink); }
 table.xgrid td.cell .empty { color: var(--ink-4); }
-table.xgrid td.miss { background: var(--held-bg); }
-table.xgrid td.miss::after, table.xgrid td.edited::after { content: ""; position: absolute; top: 0; right: 0; border: 5px solid transparent; border-top-color: var(--held); border-right-color: var(--held); }
+table.xgrid td.miss, table.xgrid td.blank { background: var(--held-bg); }
+table.xgrid td.miss::after, table.xgrid td.blank::after, table.xgrid td.edited::after { content: ""; position: absolute; top: 0; right: 0; border: 5px solid transparent; border-top-color: var(--held); border-right-color: var(--held); }
 table.xgrid td.edited::after { border-top-color: var(--ok); border-right-color: var(--ok); }
 table.xgrid td.elsewhere { background: var(--fail-bg); }
 table.xgrid td.elsewhere::after { content: ""; position: absolute; top: 0; right: 0; border: 5px solid transparent; border-top-color: var(--fail); border-right-color: var(--fail); }
@@ -35,7 +35,8 @@ table.xgrid.readonly td.cell { cursor: default; }
 .legend { display: inline-flex; align-items: center; gap: 6px; }
 .legend .lg { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-left: 10px; border: 1px solid var(--border-strong); }
 .legend .lg:first-child { margin-left: 0; }
-.legend .lg.miss { background: var(--held-bg); border-color: var(--held); }
+.legend .lg.miss, .legend .lg.blank { background: var(--held-bg); border-color: var(--held); }
+.legend .lg.blank { border-style: dashed; }
 .legend .lg.elsewhere { background: var(--fail-bg); border-color: var(--fail); }
 .legend .lg.edited { background: color-mix(in srgb, var(--ok) 25%, transparent); border-color: var(--ok); }
 .legend .lg.ok { background: var(--surface); }

@@ -13,16 +13,19 @@
 .changes li.ok svg { color: var(--ok); } .changes li.bad { color: var(--held); }
 .chat-options { display: flex; flex-wrap: wrap; gap: 8px; }
 .chat-options:empty { display: none; }
-.chat-input { display: flex; gap: 8px; }
-.chat-input input { flex: 1; min-width: 0; }
-.chat-input input:disabled { opacity: .5; }
+.chat-input { display: flex; align-items: flex-end; gap: 8px; }
+.chat-input textarea { flex: 1; min-width: 0; max-height: 132px; resize: none; overflow-y: auto; font: inherit; font-size: 13px; line-height: 1.45; padding: 8px 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--ink); box-sizing: border-box; }
+.chat-input textarea:focus { border-color: var(--border-strong); outline: none; }
+.chat-input textarea::placeholder { color: var(--ink-4); }
+.chat-input textarea:disabled { opacity: .5; }
+.msg.user .bubble { white-space: pre-wrap; }
 .chat-input .btn.primary { padding: 8px 12px; }
 .chat-input .btn:disabled { opacity: .4; cursor: default; }
 
 /* nothing is clickable while Dot is working */
 .chat-options.muted { opacity: .4; pointer-events: none; }
 .chat-options .btn:disabled { cursor: default; }
-.chat-input input:disabled, .chat-input .btn:disabled { opacity: .45; cursor: default; }
+.chat-input textarea:disabled, .chat-input .btn:disabled { opacity: .45; cursor: default; }
 
 @media (max-width: 1060px) {
   .chat-log { max-height: 50vh; overflow-y: auto; }

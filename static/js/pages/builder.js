@@ -5,6 +5,7 @@ import { api, toast } from "../shared/api.js";
 import { setCrumb } from "../shared/shell.js";
 import { stageLabel } from "../shared/labels.js";
 import { renderSheet } from "../shared/sheet.js";
+import { changesHtml, entryHtml } from "../shared/transcript.js";
 
 views.builder = async function (docId) {
   setCrumb([{ label: "Profile Builder" }]);
@@ -22,13 +23,15 @@ views.builder = async function (docId) {
         <div class="chat-log detail-scroll" id="chat-log"></div>
         <div class="chat-options" id="chat-options"></div>
         <form class="chat-input" id="chat-form" autocomplete="off">
-          <input type="text" id="chat-text" placeholder="Type a reply…" disabled>
+          <textarea id="chat-text" rows="1" placeholder="Type a reply…" disabled></textarea>
           <button class="btn primary" type="submit" id="chat-send" disabled aria-label="Send">${ICON.send}</button>
         </form>
       </aside>
     </div>`;
   Companion.mount($("#bot-stage"));
   $("#chat-form").addEventListener("submit", onChatSubmit);
+  $("#chat-text").addEventListener("input", fitChatText);
+  $("#chat-text").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#chat-form").requestSubmit(); } });
   if (docId) {
     try { renderEnvelope(await api("GET", `/api/docs/${docId}`)); return; } catch (e) { toast(e.message, "f"); }
   }
@@ -104,7 +107,6 @@ function renderEnvelope(env, opts = {}) {
   state.table = env.table;
   state.inputMode = env.bot.input;
   renderTranscript(env.transcript);
-  if (env.changes && env.changes.length) chatChanges(env.changes);
   renderOptions(env.bot);
   if (env.table) renderSheet($("#sheet-col"), env.table, { readonly: false, doc: env.doc, edit: bindGridEditing });
   else if (!$("#dropzone") || opts.force) renderSheetPlaceholder(env.doc);
@@ -189,13 +191,13 @@ function chatAdd(who, html) {
 }
 function chatChanges(changes) {
   const log = $("#chat-log"); if (!log) return;
-  log.appendChild(el(`<div class="msg sys"><ul class="changes">${changes.map(c => `<li class="${c.ok ? "ok" : "bad"}">${c.ok ? ICON.ok : ICON.warn}${esc(c.text)}</li>`).join("")}</ul></div>`));
+  log.appendChild(el(changesHtml(changes)));
   log.scrollTop = log.scrollHeight;
 }
 function renderTranscript(t) {
   const log = $("#chat-log"); if (!log) return;
   log.innerHTML = "";
-  (t || []).forEach(m => log.appendChild(el(`<div class="msg ${m.who}"><div class="bubble">${md(m.text)}</div></div>`)));
+  (t || []).forEach(m => log.appendChild(el(entryHtml(m))));
   log.scrollTop = log.scrollHeight;
 }
 function renderOptions(bot) {
@@ -211,7 +213,7 @@ function renderOptions(bot) {
   const t = $("#chat-text");
   t.disabled = state.busy || !bot.input || bot.input === "none";
   $("#chat-send").disabled = t.disabled;
-  if (!bot.input || bot.input === "none") t.value = "";
+  if (!bot.input || bot.input === "none") { t.value = ""; fitChatText(); }
 }
 async function onOption(o) {
   const d = state.doc; if (!d) return;
@@ -221,11 +223,17 @@ async function onOption(o) {
   if (o.id === "yes" && d.stage === "review") Companion.set("happy");
   await act("POST", `/api/docs/${d.id}/answer`, { option: o.id, label: o.label });
 }
+function fitChatText() {
+  const t = $("#chat-text"); if (!t) return;
+  t.style.height = "auto";
+  t.style.height = t.scrollHeight + 2 + "px";
+}
 async function onChatSubmit(e) {
   e.preventDefault();
   const t = $("#chat-text"), msg = t.value.trim();
   if (!msg || !state.doc || state.busy) return;
   t.value = "";
+  fitChatText();
   chatAdd("user", esc(msg));
   if (state.inputMode === "name") await act("POST", `/api/docs/${state.doc.id}/answer`, { option: "submit", name: msg, label: msg });
   else await act("POST", `/api/docs/${state.doc.id}/chat`, { message: msg });
@@ -286,8 +294,7 @@ function columnMenu(th, table) {
     <button data-a="kind">${col.kind === "doc" ? "Make row-level" : "Make document-level"}</button>
     <button data-a="left" ${idx === 0 ? "disabled" : ""}>Move left</button>
     <button data-a="right" ${idx === table.columns.length - 1 ? "disabled" : ""}>Move right</button>
-    <button data-a="date">Format as date</button>
-    <button data-a="number">Format as number</button>
+    <button data-a="reread">Re-read from PDF</button>
     <button data-a="fill">Fill blanks down</button>
     <button data-a="drop" class="danger">Drop column</button></div>`);
   const r = th.getBoundingClientRect();
@@ -302,8 +309,7 @@ function columnMenu(th, table) {
     if (a === "rename") return renameHeader(th);
     if (a === "kind") ops.push({ op: "set_col_kind", col: name, kind: col.kind === "doc" ? "row" : "doc" });
     if (a === "left" || a === "right") { const order = table.columns.map(c => c.name); const j = a === "left" ? idx - 1 : idx + 1; [order[idx], order[j]] = [order[j], order[idx]]; ops.push({ op: "reorder_cols", order }); }
-    if (a === "date") ops.push({ op: "transform_col", col: name, kind: "date" });
-    if (a === "number") ops.push({ op: "transform_col", col: name, kind: "number" });
+    if (a === "reread") ops.push({ op: "reread_cols", cols: [name] });
     if (a === "fill") ops.push({ op: "fill_down", col: name });
     if (a === "drop") ops.push({ op: "drop_col", col: name });
     if (ops.length) act("POST", `/api/docs/${id}/ops`, { ops });

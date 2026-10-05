@@ -46,7 +46,7 @@ async function loadProfileBody(card, pid) {
   body.innerHTML = `
     <div class="panel-head"><h2>Columns</h2><span class="hint">drag to reorder · these exact names are requested from every document of this format</span></div>
     <div class="table-wrap"><table class="tpl-cols-table"><colgroup><col class="c-drag"><col class="c-name"><col class="c-level"><col class="c-hint"><col class="c-seen"><col class="c-del"></colgroup><thead><tr><th class="drag-cell"></th><th>Name</th><th>Level</th><th>Hint for ${esc(NAME)}</th><th class="n">Seen</th><th class="del-cell"></th></tr></thead><tbody id="cols-${p.id}"></tbody>
-    <tfoot><tr class="new-col-row"><td></td><td><input type="text" placeholder="New column name" data-new="name"></td><td><select data-new="kind"><option value="row">Row</option><option value="doc">Document</option></select></td><td><input type="text" placeholder="Optional hint" data-new="hint"></td><td class="add-cell" colspan="2"><button class="btn small" data-a="add">Add</button></td></tr></tfoot></table></div>
+    <tfoot><tr class="new-col-row"><td></td><td><input type="text" placeholder="New column name" data-new="name"></td><td><select data-new="kind"><option value="row">Row</option><option value="doc">Document</option></select></td><td><input type="text" placeholder="Optional, e.g. Extract the number only" data-new="hint"></td><td class="add-cell" colspan="2"><button class="btn small" data-a="add">Add</button></td></tr></tfoot></table></div>
     <div class="panel-head"><h2>Rules learned</h2><span class="hint">from your chat corrections; applied on every future read</span></div>
     <div class="hints-list" id="hints-${p.id}">${p.hints.length ? p.hints.map((h, i) => `<div class="field-row"><span class="key">rule</span><span class="sample grow">${esc(h.text)}</span><button class="col-del-btn" data-hint="${i}" title="Forget this rule">×</button></div>`).join("") : '<div class="help">Nothing yet. Corrections you make in chat land here.</div>'}</div>
     <div class="panel-head"><h2>Fingerprint</h2><span class="hint">${p.n_docs} document${p.n_docs === 1 ? "" : "s"} · words that always appear on page 1${sig.issuer ? " · " + esc(sig.issuer) : ""}${sig.doc_kind && sig.doc_kind !== "other" ? " · " + esc(sig.doc_kind.replace("_", " ")) : ""}</span></div>
@@ -61,7 +61,7 @@ async function loadProfileBody(card, pid) {
     tbody.innerHTML = cols.map((c, i) => `<tr class="col-row" draggable="true" data-i="${i}"><td class="drag-cell"><span class="drag-handle">⋮⋮</span></td>
       <td><input type="text" value="${esc(c.name)}" data-f="name" data-i="${i}">${c.aliases && c.aliases.length ? `<div class="help">also printed as: ${c.aliases.map(esc).join(", ")}</div>` : ""}</td>
       <td><select data-f="kind" data-i="${i}"><option value="row" ${c.kind !== "doc" ? "selected" : ""}>Row</option><option value="doc" ${c.kind === "doc" ? "selected" : ""}>Document</option></select></td>
-      <td><input type="text" value="${esc(c.hint || "")}" placeholder="e.g. the delivery date, not the order date" data-f="hint" data-i="${i}"></td>
+      <td><input type="text" value="${esc(c.hint || "")}" placeholder="e.g. Extract the delivery date, not the order date" data-f="hint" data-i="${i}"></td>
       <td class="n tnum">${c.seen || 0}</td><td class="del-cell"><button class="col-del-btn" data-del="${i}" title="Remove">×</button></td></tr>`).join("");
   };
   drawCols();

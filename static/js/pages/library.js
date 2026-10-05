@@ -1,10 +1,11 @@
-import { NAME, $, $$, view, esc, md, fmtDate, ago, ICON } from "../shared/dom.js";
+import { NAME, $, $$, view, esc, fmtDate, ago, ICON } from "../shared/dom.js";
 import { state } from "../shared/state.js";
 import { views } from "../shared/views.js";
 import { api, toast } from "../shared/api.js";
 import { setCrumb } from "../shared/shell.js";
 import { stageLabel, statusPill } from "../shared/labels.js";
 import { pctOf, renderSheet } from "../shared/sheet.js";
+import { entryHtml } from "../shared/transcript.js";
 
 views.library = async function (docId) {
   if (docId) return views.doc(docId);
@@ -74,7 +75,7 @@ views.doc = async function (id) {
     ${d.read_note && d.stage === "converted" ? `<div class="note">${ICON.file}<div>Format: <b>${esc(d.profile_name || "")}</b> · ${esc(d.read_note)}. Review it in Profile Builder and confirm it to teach the new layout.</div></div>` : ""}
     <div class="panel"><div class="doc-tabs"><button class="doc-tab on" data-t="table">Sheet</button><button class="doc-tab" data-t="chat">Conversation</button><button class="doc-tab" data-t="pdf">PDF</button></div>
       <div id="tab-table" class="tab-pane"></div>
-      <div id="tab-chat" class="tab-pane doc-body" hidden><div class="chat-log static">${(env.transcript || []).map(m => `<div class="msg ${m.who}"><div class="bubble">${md(m.text)}</div></div>`).join("") || '<div class="help">No conversation recorded.</div>'}</div></div>
+      <div id="tab-chat" class="tab-pane doc-body" hidden><div class="chat-log static">${(env.transcript || []).map(entryHtml).join("") || '<div class="help">No conversation recorded.</div>'}</div></div>
       <div id="tab-pdf" class="tab-pane" hidden><iframe class="pdf-frame" title="PDF" loading="lazy"></iframe></div></div>`;
   if (env.table) renderSheet($("#tab-table"), env.table, { readonly: true });
   else $("#tab-table").innerHTML = `<div class="empty-state">No sheet yet — ${esc(stageLabel(d.stage))}.</div>`;

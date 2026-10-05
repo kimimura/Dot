@@ -19,6 +19,48 @@ def test_dot_is_told_which_letter_is_which_column():
     assert "Never count columns yourself" in p
 
 
+def test_dot_writes_column_hints_as_extract_instructions():
+    p = chat_prompt.build(doc(["Qty"]), "only keep the number")
+    assert 'A column hint (scope col) always starts with "Extract"' in p
+    assert '"text": "Extract ... (what to take for that column, and from where)"' in p
+
+
+def test_dot_sees_the_changes_it_already_made():
+    d = doc(["Item"])
+    d["transcript"] = [{"who": "user", "text": "rename Qty"}, {"who": "sys", "text": "", "changes": [{"ok": True, "text": 'Renamed "Qty" to "Item"'}]},
+                       {"who": "user", "text": "now"}]
+    assert '(Changes applied: Renamed "Qty" to "Item")' in chat_prompt.build(d, "now")
+
+
+LETTERED = ["Invoice No", "Date", "Customer", "Total", "Item", "ID"]
+
+
+def test_column_letters_in_an_edit_become_the_columns_the_user_saw():
+    def turn(o):
+        return chat._from_sheet_letters(o, LETTERED)
+    assert turn({"op": "rename_col", "col": "D", "new_name": "Amount"}) == {"op": "rename_col", "col": "Total", "new_name": "Amount"}
+    assert turn({"op": "merge_cols", "cols": ["b", "C"], "into": "AB"})["cols"] == ["Date", "Customer"]
+    assert turn({"op": "merge_cols", "cols": ["B", "C"], "into": "AB"})["into"] == "AB"
+    assert turn({"op": "reorder_cols", "order": ["E", "A"]})["order"] == ["Item", "Invoice No"]
+    assert turn({"op": "add_row", "values": {"A": "INV-1"}})["values"] == {"Invoice No": "INV-1"}
+    assert turn({"op": "drop_col", "col": "Z"})["col"] == "Z"
+    assert chat._from_sheet_letters({"op": "drop_col", "col": "B"}, ["Item", "Qty", "B"])["col"] == "B"
+    assert turn({"op": "drop_col", "col": "Customer"})["col"] == "Customer"
+
+
+def test_dot_is_told_to_pass_letters_through():
+    p = chat_prompt.build(doc(["Item"]), "drop column A")
+    assert 'put that letter exactly as the user wrote it' in p and "use the column's name in ops" not in p
+
+
+def test_dot_is_pointed_at_the_right_edit_instead_of_typing_values():
+    p = chat_prompt.build(doc(["Qty"]), "these values are wrong")
+    assert '{"op":"reread_cols","cols":["K","L"]}' in p
+    assert "Never type out values for more than 20 rows yourself" in p and 'mean reread_cols' in p
+    assert '"Move X into ROWS"' in p and "mean set_col_kind" in p
+    assert "Keep values exactly as printed. Use transform_col only when the user asks to reformat" in p
+
+
 def test_dot_is_told_that_revert_means_undo():
     p = chat_prompt.build(doc(["Item"]), "revert please")
     assert '{"op":"undo","steps":N}' in p and '{"op":"undo","steps":1}' in p
@@ -67,7 +109,7 @@ def test_dot_remembers_the_whole_conversation():
 
 def test_dot_sees_which_cells_disagree_with_the_pdf():
     p = chat_prompt.build(big_doc(), "x")
-    assert "\n200 | 543000199 | 9555684600199 [NOT IN PDF]" in p
+    assert "\n200 | 543000199 | 9555684600199 [DOESN'T MATCH PDF]" in p
     assert "\n201 | 543000200 [ON ANOTHER ROW] |" in p
 
 

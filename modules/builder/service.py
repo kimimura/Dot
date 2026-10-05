@@ -21,11 +21,23 @@ def upload(data, filename):
     return env
 
 
-def run(doc_id, fn):
-    env = work.run(doc_id, fn)
+def run(doc_id, fn, keep_changes=True):
+    env = work.run(doc_id, _keeping_changes(fn) if keep_changes else fn)
     if env["doc"]["stage"] == "extracting":
         env["working"] = kick(doc_id) or jobs.running(doc_id)
     return env
+
+
+def _keeping_changes(fn):
+    # what each edit did stays in the conversation instead of vanishing with the next reply
+    def inner(conn, d):
+        result = fn(conn, d)
+        d, changes = result if isinstance(result, tuple) else (result, [])
+        if changes:
+            transcript.add(d, "sys", "", changes=changes)
+            documents.save(conn, d)
+        return d, changes
+    return inner
 
 
 def _read_fn(llm, doc_id):
@@ -84,7 +96,9 @@ def chat_message(doc_id, message):
 
 
 def apply_ops(doc_id, op_list):
-    return run(doc_id, lambda conn, d: edits.on_ops(conn, d, documents.load_pdf(conn, doc_id), op_list))
+    typed_in_cells = all(o.get("op") == "set_cell" for o in op_list)
+    return run(doc_id, lambda conn, d: edits.on_ops(conn, d, documents.load_pdf(conn, doc_id), op_list, ai.get_llm()),
+               keep_changes=not typed_in_cells)
 
 
 def undo(doc_id):

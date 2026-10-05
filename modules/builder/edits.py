@@ -3,10 +3,10 @@ import re
 from core import pdftext
 from modules.builder.review import ask_review
 from modules.documents import history, repository as documents, transcript
-from modules.reading import table_ops, verify
+from modules.reading import column_reread, table_ops, verify
 
 
-def on_ops(conn, d, pdf, op_list):
+def on_ops(conn, d, pdf, op_list, llm=None):
     if not d.get("table"):
         return d, [{"ok": False, "text": "nothing to edit yet"}]
     history.snapshot(d)
@@ -14,12 +14,21 @@ def on_ops(conn, d, pdf, op_list):
     for o in op_list:
         if o.get("op") == "drop_col":
             d["hints"].append({"scope": "col", "col": str(o.get("col")), "text": f'Do not extract "{o.get("col")}"', "dropped": True})
-    table, changes, edited = table_ops.apply_ops(d["table"], op_list, edited)
+    table, changes = d["table"], []
+    for o in (o for o in op_list if o.get("op") == "reread_cols"):
+        table, ch, edited = column_reread.run(llm, pdf, table, o.get("cols") or [o.get("col")], edited, column_notes(d["hints"]))
+        changes += ch
+    table, more, edited = table_ops.apply_ops(table, [o for o in op_list if o.get("op") != "reread_cols"], edited)
+    changes += more
     d["table"] = table
     d["verification"] = verify.verify(table, pdftext.text_of(pdf), d["has_text_layer"], edited=edited)
     alias_hints(d, changes)
     documents.save(conn, d)
     return d, changes
+
+
+def column_notes(hints):
+    return {h["col"]: h["text"] for h in hints if h.get("scope") == "col" and h.get("col") and not h.get("alias") and not h.get("dropped")}
 
 
 def alias_hints(d, changes):

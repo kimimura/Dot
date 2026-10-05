@@ -3,16 +3,16 @@ import re
 
 import config
 from core import pdftext
-from core.ai.errors import LLMError
+from core.ai.errors import LLMError, Truncated
 from modules.builder import chat_prompt
 from modules.builder.answers import on_answer
-from modules.builder.edits import alias_hints
+from modules.builder.edits import alias_hints, column_notes
 from modules.builder.review import ask_review
 from modules.builder.saving import after_yes
 from modules.companion import dialogue
 from modules.documents import history, repository as documents, transcript
 from modules.profiles import hints as hint_rules, repository as profiles
-from modules.reading import extract, table_ops, verify
+from modules.reading import column_reread, extract, table_ops, verify
 
 
 YES = re.compile(r"^\s*(y|yes|yeah|yep|yup|correct|right|ok|okay|sure|looks good|that's it|thats it|perfect|good)\b", re.I)
@@ -49,7 +49,8 @@ def _apply_revision(conn, llm, d, pdf, reply, op_list, new_hints, message="", fo
     hints = list(d["hints"])
     changes = []
     re_ops = [o for o in op_list if o.get("op") == "reextract"]
-    other = [o for o in op_list if o.get("op") != "reextract"]
+    col_ops = [o for o in op_list if o.get("op") == "reread_cols"]
+    other = [o for o in op_list if o.get("op") not in ("reextract", "reread_cols")]
     for h in new_hints:
         hints.append({"scope": h.get("scope", "profile"), "col": h.get("col"), "text": str(h["text"]).strip()})
     edited = {k for k, v in (d.get("verification") or {}).get("cells", {}).items() if v == "edited"}
@@ -61,11 +62,14 @@ def _apply_revision(conn, llm, d, pdf, reply, op_list, new_hints, message="", fo
             changes.append({"ok": True, "text": "Re-read the document"})
         except LLMError as e:
             changes.append({"ok": False, "text": "re-read failed: %s" % e})
+    for o in col_ops:
+        table, ch, edited = column_reread.run(llm, pdf, table, o.get("cols") or [o.get("col")], edited, column_notes(hints))
+        changes += ch
     if other:
         for o in other:
             if o.get("op") == "drop_col":
                 hints.append({"scope": "col", "col": str(o.get("col")), "text": 'Do not extract "%s"' % o.get("col"), "dropped": True})
-        table, ch, edited = table_ops.apply_ops(table, other, edited)
+        table, ch, edited = table_ops.apply_ops(table, other, edited, typed_by_model=True)
         changes += ch
     verification = verify.verify(table, pdftext.text_of(pdf), d["has_text_layer"], edited=edited)
 
@@ -159,17 +163,43 @@ def _from_sheet_rows(o):
     return o
 
 
+def _from_sheet_letters(o, columns):
+    # a column letter means the column the user saw under it when they sent the message
+    names = {c.lower() for c in columns}
+    by_letter = {chat_prompt.letter(i): c for i, c in enumerate(columns)}
+
+    def name(ref):
+        if not isinstance(ref, str) or ref.strip().lower() in names or not re.fullmatch(r"[A-Za-z]{1,2}", ref.strip()):
+            return ref
+        return by_letter.get(ref.strip().upper(), ref)
+
+    o = {**o}
+    if "col" in o:
+        o["col"] = name(o["col"])
+    for key in ("cols", "order"):
+        if isinstance(o.get(key), list):
+            o[key] = [name(x) for x in o[key]]
+    if o.get("op") == "add_row" and isinstance(o.get("values"), dict):
+        o["values"] = {name(k): v for k, v in o["values"].items()}
+    return o
+
+
 def _revise(conn, llm, d, pdf, message):
     try:
         raw = llm.complete(pdf, chat_prompt.build(d, message), kind="chat")
+    except Truncated:
+        d["stage"] = "revising"
+        transcript.bot(d, text="That reply got cut off before it finished, so nothing changed. Ask for a smaller change, "
+                               "or ask me to re-read the columns from the PDF.")
+        return []
     except LLMError as e:
         d["stage"] = "revising"
         transcript.bot(d, text=f"I couldn't process that: {e}. Try again, or edit the sheet directly.")
         return []
     reply = str((raw or {}).get("reply") or "").strip() or "Okay."
     intent = (raw or {}).get("intent") if (raw or {}).get("intent") in INTENTS else "edit"
-    op_list = [_from_sheet_rows(o) for o in ((raw or {}).get("ops") or []) if isinstance(o, dict)]
     cols_now = [c["name"] for c in d["table"]["columns"]]
+    op_list = [_from_sheet_letters(_from_sheet_rows(o), cols_now) for o in ((raw or {}).get("ops") or []) if isinstance(o, dict)]
     new_hints = [h for h in ((raw or {}).get("hints") or [])
                  if isinstance(h, dict) and h.get("text") and hint_rules.useful_hint(h.get("text"), cols_now)
                  and not hint_rules.about_order(h.get("text"))]

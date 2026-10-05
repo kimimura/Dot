@@ -4,7 +4,7 @@ import time
 
 import config
 from core.ai import pacing
-from core.ai.errors import GARBLED, BUSY, RATE_MARKERS, RETRY_MARKERS, LLMError, Truncated, friendly
+from core.ai.errors import BUSY, CUT_OFF, GARBLED, RATE_MARKERS, RETRY_MARKERS, LLMError, Truncated, friendly
 
 
 def parse_json(text):
@@ -25,14 +25,15 @@ class GeminiAdapter:
     def complete(self, pdf, prompt, kind="extract"):
         from google.genai import types
         part = types.Part.from_bytes(data=pdf, mime_type="application/pdf")
-        cfg = types.GenerateContentConfig(response_mime_type="application/json", temperature=config.AI_TEMPERATURE)
+        cap = config.AI_CHAT_MAX_REPLY_TOKENS if kind == "chat" else None
+        cfg = types.GenerateContentConfig(response_mime_type="application/json", temperature=config.AI_TEMPERATURE, max_output_tokens=cap)
 
         def send(p):
             pacing.wait_turn()
             r = self.client.models.generate_content(model=self.model, contents=[part, p], config=cfg)
             cands = getattr(r, "candidates", None) or []
             if cands and "MAX_TOKENS" in str(getattr(cands[0], "finish_reason", "")):
-                raise Truncated(GARBLED)
+                raise Truncated(CUT_OFF)
             return r.text
 
         waited, n = 0.0, 0

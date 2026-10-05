@@ -5,6 +5,7 @@ RATE_MARKERS = ("429", "resource_exhausted", "quota", "rate limit")
 BUSY = "timed out"
 DAILY = "daily limit reached — try again tomorrow"
 GARBLED = "unreadable result"
+CUT_OFF = "reply was cut off before it finished"
 
 
 class LLMError(Exception):

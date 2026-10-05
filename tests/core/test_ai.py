@@ -1,8 +1,12 @@
+from types import SimpleNamespace
+
 import pytest
 
 import config
 from core import ai
 from core.ai import errors, pacing
+from core.ai.errors import Truncated
+from core.ai.gemini import GeminiAdapter
 
 MESSAGES = [
     ("429 RESOURCE_EXHAUSTED: quota exceeded for metric generate_requests_per_model_per_day, limit PerDay", errors.DAILY),
@@ -18,7 +22,7 @@ def test_errors_are_translated_into_plain_messages(raw, shown):
     assert errors.friendly(Exception(raw)) == shown
 
 
-@pytest.mark.parametrize("shown", [s for _, s in MESSAGES] + [errors.BUSY, errors.DAILY, errors.GARBLED])
+@pytest.mark.parametrize("shown", [s for _, s in MESSAGES] + [errors.BUSY, errors.DAILY, errors.GARBLED, errors.CUT_OFF])
 def test_messages_never_name_the_provider_or_speak_as_dot(shown):
     low = shown.lower()
     assert "gemini" not in low and "google" not in low and "model" not in low
@@ -50,3 +54,33 @@ def test_without_a_key_reading_still_works_offline(monkeypatch):
     monkeypatch.setattr(config, "AI_PROVIDER", "")
     monkeypatch.setattr(config, "AI_KEY", "")
     assert ai.status() == "offline" and isinstance(ai.get_llm(), ai.OfflineAdapter)
+
+
+class Models:
+    def __init__(self, reply, finish=""):
+        self.reply, self.finish, self.caps = reply, finish, []
+
+    def generate_content(self, model, contents, config):
+        self.caps.append(config.max_output_tokens)
+        return SimpleNamespace(text=self.reply, candidates=[SimpleNamespace(finish_reason=self.finish)])
+
+
+def reader_with(models):
+    reader = GeminiAdapter("key", "model")
+    reader.client = SimpleNamespace(models=models)
+    return reader
+
+
+def test_a_runaway_chat_reply_is_stopped_and_says_it_was_cut_off(monkeypatch):
+    monkeypatch.setattr(pacing, "wait_turn", lambda: None)
+    models = Models('{"reply": "8395.49, 8395.4', finish="MAX_TOKENS")
+    with pytest.raises(Truncated, match="cut off"):
+        reader_with(models).complete(b"%PDF", "hello", kind="chat")
+    assert models.caps == [config.AI_CHAT_MAX_REPLY_TOKENS]
+
+
+def test_reading_a_file_is_not_capped(monkeypatch):
+    monkeypatch.setattr(pacing, "wait_turn", lambda: None)
+    models = Models('{"documents": []}')
+    reader_with(models).complete(b"%PDF", "hello", kind="extract")
+    assert models.caps == [None]

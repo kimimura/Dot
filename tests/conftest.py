@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 os.environ["LLM_PROVIDER"] = "offline"
 
 from modules.documents import repository as documents  # noqa: E402
+from modules.email_intake import repository as email_requests  # noqa: E402
 from modules.profiles import repository as profiles  # noqa: E402
 from core import ai, db, pdftext  # noqa: E402
 import pdfgen  # noqa: E402
@@ -34,7 +35,14 @@ class FakeConn:
 class FakeDb:
     # in-memory stand-in for SQL Server: same functions, same document and profile shapes
     def __init__(self):
-        self.docs, self.pdfs, self.profiles = {}, {}, {}
+        self.docs, self.pdfs, self.profiles, self.emails = {}, {}, {}, {}
+
+    def add_email(self, conn, rid, sender, stamp, doc_ids):
+        self.emails[rid] = {"id": rid, "sender": sender, "received_at": db.now(), "stamp": stamp, "doc_ids": list(doc_ids),
+                            "status": "waiting", "error": None, "sent_at": None}
+
+    def finish_email(self, conn, rid, status, error=None):
+        self.emails[rid].update(status=status, error=error, sent_at=db.now())
 
     def create(self, conn, filename, info, batch_id=None, stage="identify"):
         d = {"id": db.new_id(), "filename": filename, "sha256": info.sha256, "size": info.size, "n_pages": info.n_pages,
@@ -133,6 +141,10 @@ class FakeDb:
         mp.setattr(profiles, "save", lambda conn, p: self.profiles.__setitem__(p["id"], copy.deepcopy(p)))
         mp.setattr(profiles, "create", self.create_profile)
         mp.setattr(profiles, "delete", lambda conn, pid: self.profiles.pop(pid, None))
+        mp.setattr(email_requests, "create", self.add_email)
+        mp.setattr(email_requests, "get", lambda conn, rid: copy.deepcopy(self.emails.get(rid)))
+        mp.setattr(email_requests, "waiting", lambda conn: [r for r, e in self.emails.items() if e["status"] == "waiting"])
+        mp.setattr(email_requests, "finish", self.finish_email)
         mp.setattr(ai, "get_llm", lambda: ai.OfflineAdapter())
         return self
 

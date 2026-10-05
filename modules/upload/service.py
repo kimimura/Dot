@@ -6,9 +6,9 @@ from pathlib import Path
 from flask import abort
 
 import config
-from core import db, jobs, locks, pdftext, sheets
+from core import db, jobs, locks, sheets
 from core.errors import Refused
-from modules.conversion import queue as conversion
+from modules.conversion import intake, queue as conversion
 from modules.documents import repository as documents, work
 from modules.profiles import repository as profiles
 
@@ -19,21 +19,9 @@ def accept(files, batch_id):
     bid = batch_id or db.new_id()
     if not bid.isalnum() or len(bid) > config.BATCH_ID_MAX_CHARS:
         raise Refused(400, "bad batch", "That batch id isn't valid.")
-    rejected, ids = [], []
     conn = db.connect()
     try:
-        for filename, data in files:
-            if not filename.lower().endswith(".pdf"):
-                rejected.append({"filename": filename, "error": "Not a PDF."})
-                continue
-            try:
-                info = pdftext.inspect(data)
-            except pdftext.PdfError as e:
-                rejected.append({"filename": filename, "error": str(e)})
-                continue
-            d = documents.create(conn, filename, info, batch_id=bid, stage="queued")
-            documents.store_pdf(conn, d["id"], data)
-            ids.append(d["id"])
+        ids, rejected = intake.store(conn, files, bid)
         conn.commit()
     finally:
         conn.close()

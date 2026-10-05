@@ -319,18 +319,15 @@ def _rest_of_line(row, c, plain):
     return None
 
 
-def _ends_early(rows, rcols, plain, own, more=()):
-    # a column whose values run to the end of their line on nearly every row lost its end where one stops short
+def _line_end_columns(rows, rcols, plain, own):
+    # columns whose values run to the end of their line on nearly every row
     rests = [{c: _rest_of_line(r, c, plain[span[0]:span[1]]) for c in rcols} if span else {} for r, span in zip(rows, own)]
-    learned = rests + [{c: _rest_of_line(r, c, plain[span[0]:span[1]]) for c in rcols} if span else {} for r, span in more]
-    early = [set() for _ in rows]
+    ends = set()
     for c in rcols:
-        seen = [x[c] for x in learned if x.get(c) is not None]
+        seen = [x[c] for x in rests if x.get(c) is not None]
         if len(seen) >= config.VERIFY_MIN_WRAPS and seen.count("") >= config.VERIFY_LINE_END_SHARE * len(seen):
-            for i, x in enumerate(rests):
-                if x.get(c):
-                    early[i].add(c)
-    return early
+            ends.add(c)
+    return ends
 
 
 def _cut_short(row, lines, plain, wraps):
@@ -345,34 +342,67 @@ def _cut_short(row, lines, plain, wraps):
     return short
 
 
-def _check_rows(table, text, cells, learn_from=None):
+def read_rows(table, text, learn_from=None):
+    # where each row sits in the PDF text, and what its columns usually look like there
     flat, starts = flat_lines(text)
-    bands = row_bands(table, flat, starts) if flat else None
-    if not bands:
-        return 0
+    if not flat:
+        return None
     lines = strict_lines(text)
     plain = [norm_text(line) for line in lines]
-    spans = [(bisect_right(starts, a) - 1, bisect_left(starts, b)) for a, b in bands]
     rcols = [c["name"] for c in table["columns"] if c.get("kind") != "doc"]
+    own = _own_lines(table["rows"], rcols, plain)
+    pos = lambda n: starts[n] if n < len(starts) else len(flat)
+    # when every value repeats somewhere, bands can't be placed: a row's own lines stand in for its band
+    bands = row_bands(table, flat, starts) or [(pos(o[0]), pos(o[1])) if o else None for o in own]
+    if not any(bands):
+        return None
+    spans = [(bisect_right(starts, b[0]) - 1, bisect_left(starts, b[1])) if b else None for b in bands]
+    # another version of the same sheet (before a re-read, say) teaches what this one's columns usually look like
+    more = list(zip(learn_from["rows"], _own_lines(learn_from["rows"], rcols, plain))) if learn_from else []
+    seen_rows, seen_own = table["rows"] + [r for r, _ in more], own + [s for _, s in more]
+    return {"flat": flat, "lines": lines, "plain": plain, "printed": [" ".join(x.split()) for x in text.splitlines()],
+            "rcols": rcols, "own": own, "bands": bands, "spans": spans,
+            "wraps": _wrap_shapes(seen_rows, rcols, lines, plain, seen_own), "ends": _line_end_columns(seen_rows, rcols, plain, seen_own)}
+
+
+def _near(ctx, i):
+    # exactness only needs the text near the row; where the row sits is judged by its band
+    s, e = ctx["own"][i] or ctx["spans"][i]
+    return slice(max(0, s - config.VERIFY_WRAP_REACH), e + (0 if ctx["own"][i] else config.VERIFY_WRAP_REACH))
+
+
+def short_columns(ctx, i, row):
+    # columns of the row that leave off part of what the PDF prints for it
+    if not ctx["own"][i]:
+        return set()
+    s, e = ctx["own"][i]
+    lines, plain = ctx["lines"][s:e], ctx["plain"][s:e]
+    return _cut_short(row, lines, plain, ctx["wraps"]) | {c for c in ctx["ends"] if _rest_of_line(row, c, plain)}
+
+
+def fits(ctx, i, row, c, value):
+    near = _near(ctx, i)
+    return printed(value, ctx["lines"][near], ctx["plain"][near]) and c not in short_columns(ctx, i, {**row, c: value})
+
+
+def _check_rows(table, text, cells, learn_from=None):
+    ctx = read_rows(table, text, learn_from)
+    if not ctx:
+        return 0
+    flat, lines, plain = ctx["flat"], ctx["lines"], ctx["plain"]
     per_doc = {}
     for r in table["rows"]:
         per_doc.setdefault(r.get("_doc", 0), []).append(r)
     # a value repeated on every row of its document is printed once for the whole document
-    same = {(d, c) for d, rs in per_doc.items() for c in rcols if len({x.get(c, "") for x in rs}) == 1}
-    own = _own_lines(table["rows"], rcols, plain)
-    # another version of the same sheet (before a re-read, say) teaches what this one's columns usually look like
-    more = list(zip(learn_from["rows"], _own_lines(learn_from["rows"], rcols, plain))) if learn_from else []
-    wraps = _wrap_shapes(table["rows"] + [r for r, _ in more], rcols, lines, plain, own + [s for _, s in more])
-    early = _ends_early(table["rows"], rcols, plain, own, more)
+    same = {(d, c) for d, rs in per_doc.items() for c in ctx["rcols"] if len({x.get(c, "") for x in rs}) == 1}
     change = 0
     for i, r in enumerate(table["rows"]):
-        (a, b), (la, lb) = bands[i], spans[i]
-        s, e = own[i] or (la, lb)
-        # exactness only needs the text near the row; where the row sits is judged below
-        near = slice(max(0, s - config.VERIFY_WRAP_REACH), e + (0 if own[i] else config.VERIFY_WRAP_REACH))
+        if not ctx["bands"][i]:
+            continue
+        (a, b), (la, lb), near = ctx["bands"][i], ctx["spans"][i], _near(ctx, i)
         # a value that starts in the row's band may wrap past its end
         wrap = slice(la, lb + config.VERIFY_WRAP_REACH)
-        for c in rcols:
+        for c in ctx["rcols"]:
             key, state, v = f"{i}|{c}", cells.get(f"{i}|{c}"), r.get(c, "")
             if state not in ("ok", "miss") or (r.get("_doc", 0), c) in same:
                 continue
@@ -384,8 +414,7 @@ def _check_rows(table, text, cells, learn_from=None):
                 new = "miss"
             change += (new == "ok") - (state == "ok")
             cells[key] = new
-        s, e = own[i] or (0, 0)
-        for c in _cut_short(r, lines[s:e], plain[s:e], wraps) | early[i]:
+        for c in short_columns(ctx, i, r):
             if cells.get(f"{i}|{c}") == "ok":
                 cells[f"{i}|{c}"] = "miss"
                 change -= 1

@@ -154,6 +154,16 @@ def test_a_value_not_printed_exactly_like_that_is_yellow(wrapped, was, now):
     assert yellow(verify.verify(t, text, True)) == [f"{i}|Description"]
 
 
+def test_orders_that_repeat_exactly_are_still_checked_row_by_row():
+    orders = [pdfgen.econ_po(f"200{k}-7126{k:06d}", f"200{k} W{k}", wrapped_items(0)) for k in range(3)]
+    pdf, truth = pdfgen.econsave(orders, per_page=4)
+    text = pdftext.text_of(pdf)
+    assert yellow(verify.verify(truth, text, True)) == [] and red(verify.verify(truth, text, True)) == []
+    t = copy.deepcopy(truth)
+    t["rows"][10]["Description"] = t["rows"][10]["Description"].replace(" 547309", "")
+    assert yellow(verify.verify(t, text, True)) == ["10|Description"]
+
+
 def test_separators_the_pdf_prints_may_be_left_out(wrapped):
     text, truth = wrapped
     t = copy.deepcopy(truth)

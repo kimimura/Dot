@@ -17,10 +17,10 @@ def env(*names, default=""):
 
 # ── app ──────────────────────────────────────────────────────────────────────
 COMPANION_NAME = env("COMPANION_NAME", default="Dot")
-HOST = "127.0.0.1"
+HOST = env("HOST", default="127.0.0.1")
 PORT = int(env("PORT", default="5000"))
 SERVER_THREADS = 4
-REQUEST_MAX_BYTES = 25 * 1024 * 1024
+REQUEST_MAX_BYTES = 50 * 1024 * 1024
 STATIC_DIR = ROOT / "static"
 TEMPLATE_DIR = ROOT / "templates"
 
@@ -73,6 +73,7 @@ VERIFY_MIN_WRAPS = 2
 VERIFY_LINE_END_SHARE = 0.8
 VERIFY_WRAP_REACH = 40
 VERIFY_MAX_ROW_JUMP = 200
+FIX_FROM_TEXT_SIMILAR = 0.75
 
 # ── reading with a learned layout ────────────────────────────────────────────
 LAYOUT_MAX_VARIANTS = 3
@@ -115,3 +116,19 @@ BATCH_ID_MAX_CHARS = 32
 STATS_TOP_FORMATS = 8
 STATS_WEEK_DAYS = 7
 STATS_CHART_DAYS = 14
+
+# ── email intake ─────────────────────────────────────────────────────────────
+EMAIL_INTAKE_TOKEN = env("EMAIL_INTAKE_TOKEN")
+EMAIL_ALERT_URL = env("EMAIL_ALERT_URL")
+EMAIL_ALERT_TIMEOUT = 30
+EMAIL_ALERT_TRIES = 3
+EMAIL_ALERT_RETRY_SECONDS = 30
+EMAIL_POLL_SECONDS = 5
+EMAIL_MAX_WAIT_SECONDS = 3 * 60 * 60
+EMAIL_STAMP_FORMAT = "%Y%m%d_%H%M%S"
+EMAIL_FILE_NAME = "{format}_SalesOrder_{stamp}"
+EMAIL_SUBJECT = "{n} PDF{s} Received"
+EMAIL_FILE_LINE = "{rows} line{s} · {file}"
+EMAIL_UNIDENTIFIED = "Unidentified"
+EMAIL_UNREADABLE = "Could not be read"
+EMAIL_UNFINISHED = "Still processing"

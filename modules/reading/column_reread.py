@@ -5,7 +5,7 @@ from difflib import SequenceMatcher
 import config
 from core import pdftext
 from core.ai.errors import LLMError, Truncated
-from modules.reading import doc_groups, verify
+from modules.reading import doc_groups, from_text, verify
 from modules.reading.extract import plan_chunks
 from modules.reading.verify import norm_text
 
@@ -125,6 +125,16 @@ def _refuse_unprinted(table, rows, old, texts):
     return refused
 
 
+def _fix_from_text(table, rows, cols, edited, texts):
+    # what the reader still got wrong is taken from the PDF's own text where it prints one clear answer
+    if not cols or not any(t.strip() for t in texts):
+        return rows, 0
+    text, now = "\n\n".join(texts), {**table, "rows": rows}
+    cells = verify.verify(now, text, True, learn_from=table)["cells"]
+    now, fixed = from_text.fix(now, text, cells, cols, edited, learn_from=table)
+    return now["rows"], fixed
+
+
 def run(llm, pdf, table, cols, edited, notes=None):
     names = {c["name"].lower(): c for c in table["columns"]}
     targets = [names.get(str(c).strip().lower()) for c in cols]
@@ -172,9 +182,11 @@ def run(llm, pdf, table, cols, edited, notes=None):
     if not old:
         return table, [{"ok": False, "text": f"Nothing to re-read in {label}: every cell there was typed by hand"}], edited
     refused = _refuse_unprinted(table, rows, old, texts)
+    rows, fixed = _fix_from_text(table, rows, row_targets, edited, texts)
     if refused and all(rows[i][name] == was for (i, name), was in old.items()):
         return table, [{"ok": False, "text": f"Nothing changed in {label}: the values that differed from the sheet don't match the PDF"}], edited
     detail = f"{len(found)} of {len(rows)} rows" if row_targets else f"{len(by_doc)} documents"
     note = f", {kept} cells typed by hand kept" if kept else ""
     note += f", {len(refused)} cells left as they were because the new value doesn't match the PDF" if refused else ""
+    note += f", {fixed} cells fixed from the PDF text" if fixed else ""
     return {**table, "rows": rows}, [{"ok": True, "text": f"Re-read {label} from the PDF ({detail}{note})"}], edited

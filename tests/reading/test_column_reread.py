@@ -143,6 +143,29 @@ def test_a_re_read_that_cuts_many_values_short_is_still_refused(orders):
     assert table == truth and not changes[0]["ok"]
 
 
+def test_what_the_reader_keeps_getting_wrong_is_fixed_from_the_pdf_text(orders):
+    pdf, truth = orders
+    t = copy.deepcopy(truth)
+    wrong = [i for i, r in enumerate(t["rows"]) if "BPEN" in r["Description"]]
+    for i in wrong:
+        t["rows"][i]["Description"] = t["rows"][i]["Description"].replace("BPEN", "B-PEN")
+    # the reader makes the same mistakes the sheet already has
+    table, changes, _ = column_reread.run(Reader(t), pdf, t, ["Description"], set())
+    assert table["rows"] == truth["rows"] and changes[0]["ok"]
+    assert f"{len(wrong)} cells fixed from the PDF text" in changes[0]["text"]
+
+
+def test_a_re_read_copies_the_spacing_the_pdf_prints(orders):
+    pdf, truth = orders
+    t = copy.deepcopy(truth)
+    respaced = [i for i, r in enumerate(t["rows"]) if "0.5MMBLK" in r["Description"]]
+    for i in respaced:
+        t["rows"][i]["Description"] = t["rows"][i]["Description"].replace("0.5MMBLK", "0.5MM BLK")
+    table, changes, _ = column_reread.run(Reader(t), pdf, t, ["Description"], set())
+    assert respaced and table["rows"] == truth["rows"]
+    assert f"{len(respaced)} cells fixed from the PDF text" in changes[0]["text"]
+
+
 def test_a_re_read_that_matches_nothing_in_the_pdf_changes_nothing(orders):
     pdf, truth = orders
 

@@ -1,6 +1,7 @@
 import config
 from core import pdftext
 from core.ai.errors import Truncated
+from modules.reading import doc_groups
 from modules.reading.parse import flatten, validate
 from modules.reading.prompts import build_prompt
 from modules.reading.verify import norm_text
@@ -65,7 +66,7 @@ def run(llm, pdf, profile=None, hints=None, instruction=None, progress=None, tex
         if progress and not whole:
             progress(done, n)
         part = pdf if (a, b) == (1, n) else pdftext.pages(pdf, a, b)
-        prompt = build_prompt(template or profile, hints, instruction)
+        prompt = build_prompt(template or profile, hints, instruction, fresh=profile is None)
         if (a, b) != (1, n):
             prompt += _chunk_note(a, b, n)
         try:
@@ -94,7 +95,7 @@ def run(llm, pdf, profile=None, hints=None, instruction=None, progress=None, tex
         done += b - a + 1
     if progress and not whole:
         progress(n, n)
-    return table, sig, extra
+    return doc_groups.join_pages(table), sig, extra
 
 
 def _chunk_note(a, b, n):

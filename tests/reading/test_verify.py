@@ -83,3 +83,80 @@ def test_document_fields_are_not_checked_for_rows(text):
 def test_scans_are_not_checked():
     v = verify.verify(swap(sheet(), "Total", 1, 2), "", False)
     assert red(v) == [] and v["checked"] is False
+
+
+def repeated_items(k):
+    # the same products in every order, each order at its own prices: only the price line tells the rows apart
+    return [pdfgen.econ_item(i["code"], i["bar"], i["desc"], i["unit"], i["pack"], i["qty"], f"{float(i['price']) + 0.01 * (k + 1) + 0.1 * n:.4f}",
+                             tail=i["tail"], desc_on_bar=i["on_bar"]) for n, i in enumerate(pdfgen.ECON_A + pdfgen.ECON_B)]
+
+
+@pytest.fixture(scope="module")
+def orders():
+    pdf, truth = pdfgen.econsave([pdfgen.econ_po(f"100{k}-6126{k:06d}", f"100{k} S{k}", repeated_items(k)) for k in range(4)], per_page=4)
+    return pdftext.text_of(pdf), truth
+
+
+def test_rows_found_by_their_price_line_are_not_red(orders):
+    text, truth = orders
+    assert red(verify.verify(truth, text, True)) == []
+
+
+def test_codes_swapped_in_such_a_file_are_still_red(orders):
+    text, truth = orders
+    assert "2|Item Barcode" in red(verify.verify(swap(truth, "Item Barcode", 1, 2), text, True))
+
+
+def test_a_document_field_left_empty_on_some_of_its_pages_is_missing():
+    cols = [{"name": "PO", "kind": "doc"}, {"name": "Total", "kind": "doc"}, {"name": "Item", "kind": "row"}]
+    rows = [{"_doc": 0, "PO": "PO-1", "Total": "", "Item": "A100"}, {"_doc": 1, "PO": "PO-1", "Total": "99.00", "Item": "B200"},
+            {"_doc": 2, "PO": "PO-2", "Total": "", "Item": "C300"}]
+    v = verify.verify({"columns": cols, "rows": rows}, "PO-1 A100 B200 99.00 PO-2 C300", True)
+    assert v["cells"]["0|Total"] == "blank" and v["cells"]["2|Total"] == "na"
+    assert (v["verified"], v["total"]) == (7, 8)
+
+
+def yellow(v):
+    return sorted(k for k, s in v["cells"].items() if s == "miss")
+
+
+def wrapped_items(k):
+    # one code wraps onto the top of the next page, and one amount runs past a thousand
+    items = pdfgen.ECON_A[:3] + [pdfgen.econ_item("543000136", "9555684635143", "FC GRIP X7 BPEN-R 0.7MM BLUE 3S", "1UNITx1", "1.00", "10", "3.5900",
+                                                  tail="547405", tail_next_page=True)] + pdfgen.ECON_B + \
+            [pdfgen.econ_item("543710032", "9555684690418", "FC DF ERASER SIZE 20 WHITE 187020", "1 UNIT", "40.00", "400", "3.0600")]
+    return [{**i, "price": f"{float(i['price']) + 0.01 * (k + 1) + 0.1 * n:.4f}"} for n, i in enumerate(items)]
+
+
+@pytest.fixture(scope="module")
+def wrapped():
+    orders = [pdfgen.econ_po(f"200{k}-7126{k:06d}", f"200{k} W{k}", wrapped_items(k)) for k in range(3)]
+    for o in orders:
+        for i in o["items"]:
+            i["amount"] = f"{float(i['qty']) * float(i['price']):,.2f}"
+    pdf, truth = pdfgen.econsave(orders, per_page=4)
+    return pdftext.text_of(pdf), truth
+
+
+def test_a_correct_sheet_with_wrapped_codes_has_no_marks(wrapped):
+    text, truth = wrapped
+    v = verify.verify(truth, text, True)
+    assert yellow(v) == [] and red(v) == [] and v["verified"] == v["total"]
+
+
+@pytest.mark.parametrize("was, now", [("BPEN-R0.5MMBLK", "B-PEN-R0.5MMBLK"), ("ERASER SIZE 48", "ERASE SIZE 48"),
+                                      (" 547309", ""), (" 547405", ""), (" 187049", "")])
+def test_a_value_not_printed_exactly_like_that_is_yellow(wrapped, was, now):
+    text, truth = wrapped
+    t = copy.deepcopy(truth)
+    i = next(i for i, r in enumerate(t["rows"]) if was in r["Description"])
+    t["rows"][i]["Description"] = t["rows"][i]["Description"].replace(was, now)
+    assert yellow(verify.verify(t, text, True)) == [f"{i}|Description"]
+
+
+def test_separators_the_pdf_prints_may_be_left_out(wrapped):
+    text, truth = wrapped
+    t = copy.deepcopy(truth)
+    i = next(i for i, r in enumerate(t["rows"]) if "," in r["Amount (RM)"])
+    t["rows"][i]["Amount (RM)"] = t["rows"][i]["Amount (RM)"].replace(",", "")
+    assert yellow(verify.verify(t, text, True)) == [] and red(verify.verify(t, text, True)) == []

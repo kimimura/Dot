@@ -164,9 +164,9 @@ NEW_ITEMS = [
 ]
 
 
-def econ_item(code, bar, desc, unit, pack, qty, price, tail=None, desc_on_bar=False):
+def econ_item(code, bar, desc, unit, pack, qty, price, tail=None, desc_on_bar=False, tail_next_page=False):
     return {"code": code, "bar": bar, "desc": desc, "unit": unit, "pack": pack, "qty": qty, "price": price,
-            "amount": f"{float(qty) * float(price):,.2f}", "tail": tail, "on_bar": desc_on_bar}
+            "amount": f"{float(qty) * float(price):,.2f}", "tail": tail, "on_bar": desc_on_bar, "tail_next_page": tail_next_page}
 
 
 def econ_po(po, ship, items, addr=None):
@@ -193,6 +193,7 @@ def econsave(pos, per_page=3):
             else:
                 lines.append("FABER-CASTELL TRADINGSDN BHD ECONSAVECASH&CARRY SDN BHD")
             lines += ["Item Description SKU/Order Unit Order Pack Total Unit Price Amount", "Barcode Capacity Free Unit Qty. (RM) (RM)"]
+            lines += [it["tail"] for it in chunks[n - 2][-1:] if n > 1 and it["tail"] and it["tail_next_page"]]
             for it in chunk:
                 lines.append(it["code"])
                 if it["on_bar"]:
@@ -200,7 +201,7 @@ def econsave(pos, per_page=3):
                 else:
                     lines += [it["bar"], it["desc"]]
                 lines += ["10.00", it["unit"], it["pack"], "0.00", f"{float(it['qty']):.2f} {it['price']} {it['amount']}"]
-                if it["tail"]:
+                if it["tail"] and not (it["tail_next_page"] and it is chunk[-1] and n < len(chunks)):
                     lines.append(it["tail"])
             if n == len(chunks):
                 lines += [f"Grand Total {qty:,.2f} {total:,.2f}", "* This iscomputer generated, no signatureis required.*"]

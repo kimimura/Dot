@@ -4,7 +4,7 @@ import pytest
 
 import pdfgen
 import config
-from modules.reading import extract, parse, verify
+from modules.reading import extract, parse, prompts, verify
 from core import pdftext
 from core.ai.errors import LLMError, Truncated
 
@@ -53,6 +53,31 @@ def got(table):
 
 
 # ── reading what comes back ──────────────────────────────────────────────────
+
+def test_a_new_format_puts_every_field_in_the_sheet_and_a_saved_one_suggests_extras():
+    fmt = {"name": "this document", "columns": [{"name": "Invoice No", "kind": "doc"}], "hints": []}
+    fresh, later_part = prompts.build_prompt(), prompts.build_prompt(fmt, fresh=True)
+    for p in (fresh, later_part):
+        assert "Extract every field printed" in p and "extra_fields" not in p and '"documents": [' in p
+    assert "add any other field you find as a new column" in later_part and "Do not add other columns" not in later_part
+    saved = prompts.build_prompt({**fmt, "name": "ACME"})
+    assert 'put them in "extra_fields"' in saved and '"extra_fields": {}' in saved and "Do not add other columns" in saved
+
+
+def test_a_new_format_read_in_parts_keeps_fields_found_later(monkeypatch):
+    seen = []
+
+    class Reader:
+        def complete(self, pdf, prompt, kind="extract"):
+            seen.append(prompt)
+            fields = {"PO": f"PO-{len(seen)}"} if len(seen) == 1 else {"PO": f"PO-{len(seen)}", "Vendor Tel": "03-1234"}
+            return {"documents": [{"document_fields": fields, "row_columns": ["Item"], "rows": [["A"]]}]}
+    monkeypatch.setattr(config, "EXTRACT_CHUNK_CHARS", 10)
+    pdf = pdfgen.purchase_orders(orders=1, pages_per_order=2)[0]
+    table, _, extra = extract.run(Reader(), pdf, texts=pdftext.page_texts(pdf))
+    assert "Vendor Tel" in [c["name"] for c in table["columns"]] and extra == {}
+    assert all("extra_fields" not in p for p in seen)
+
 
 def test_rows_given_as_lists_are_matched_to_their_columns():
     parsed = parse.validate({"documents": [{"document_fields": {"Invoice No ": "INV-1"}, "row_columns": ["Item", "Qty"],

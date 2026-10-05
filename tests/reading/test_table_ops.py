@@ -27,6 +27,22 @@ def row(t, i=0):
     return {c["name"]: t["rows"][i][c["name"]] for c in t["columns"]}
 
 
+def test_values_typed_by_the_model_still_have_to_match_the_pdf():
+    typed = [{"op": "set_col", "col": "Note", "values": ["a", "b", "c"]}, {"op": "set_cell", "row": 0, "col": "Total", "value": "1"},
+             {"op": "add_col", "name": "Extra", "value": "x"}, {"op": "add_row", "values": {"Note": "z"}}]
+    _, _, by_model = table_ops.apply_ops(sheet(), typed, {"1|Note", "0|Total"}, typed_by_model=True)
+    _, _, by_hand = table_ops.apply_ops(sheet(), typed)
+    assert by_model == set()
+    assert {"0|Note", "2|Note", "0|Total", "1|Extra", "3|Note", "3|PO No"} <= by_hand
+
+
+def test_a_single_letter_never_lands_on_a_column_that_merely_contains_it():
+    t, changes, _ = apply({"op": "drop_col", "col": "D"})
+    assert names(t) == names(sheet()) and changes == [{"ok": False, "text": 'No column called "D"'}]
+    t, _, _ = apply({"op": "drop_col", "col": "Desc"})
+    assert "Description" not in names(t)
+
+
 def test_split_into_the_same_name_keeps_the_name():
     t, ch, _ = apply({"op": "split_col", "col": "Quantity", "into": ["Quantity", "UOM"], "sep": " "})
     assert names(t) == ["PO No", "Item Code", "Quantity", "UOM", "Description", "Note", "Total"]

@@ -15,7 +15,7 @@ def _col(t, name):
         if c["name"].lower() == n:
             return c
     for c in t["columns"]:
-        if n in c["name"].lower():
+        if len(n) >= 3 and n in c["name"].lower():
             return c
     raise OpError(f'No column called "{name}"')
 
@@ -42,6 +42,15 @@ def _unique(t, name, skip=None):
 def _mark(edited, t, col, rows=None):
     for r in (rows if rows is not None else range(len(t["rows"]))):
         edited.add(f"{r}|{col}")
+
+
+def _wrote(edited, t, col, rows, op):
+    # a person typing a value vouches for it; a value typed by the model still has to match the PDF
+    keys = {f"{r}|{col}" for r in (rows if rows is not None else range(len(t["rows"])))}
+    if op.get("_typed_by_model"):
+        edited.difference_update(keys)
+    else:
+        edited.update(keys)
 
 
 # ── ops ──────────────────────────────────────────────────────────────────────
@@ -103,7 +112,7 @@ def add_col(t, op, edited):
         r[name] = p[name]
     if kind == "doc":
         t["columns"].sort(key=lambda x: 0 if x["kind"] == "doc" else 1)
-    _mark(edited, t, name)
+    _wrote(edited, t, name, None, op)
     return f'Added column "{name}"'
 
 
@@ -134,7 +143,7 @@ def extract_col(t, op, edited):
 def set_col(t, op, edited):
     c = _col(t, op.get("col"))
     _fill(t, c["name"], op)
-    _mark(edited, t, c["name"])
+    _wrote(edited, t, c["name"], None, op)
     return f'Updated every value in "{c["name"]}"'
 
 
@@ -149,7 +158,7 @@ def set_cell(t, op, edited):
         idx = [i]
     for k in idx:
         t["rows"][k][c["name"]] = v
-    _mark(edited, t, c["name"], idx)
+    _wrote(edited, t, c["name"], idx, op)
     return f'Set "{c["name"]}" on row {i + 1}' + (f" (and {len(idx) - 1} more)" if len(idx) > 1 else "")
 
 
@@ -321,9 +330,8 @@ def add_row(t, op, edited):
         v = vals.get(c["name"], "")
         r[c["name"]] = "" if v is None else str(v)
     t["rows"].append(r)
-    _mark(edited, t, None, [])
     for c in t["columns"]:
-        edited.add(f"{len(t['rows']) - 1}|{c['name']}")
+        _wrote(edited, t, c["name"], [len(t["rows"]) - 1], op)
     return "Added a row"
 
 
@@ -335,7 +343,7 @@ OPS = {
 }
 
 
-def apply_ops(table, ops, edited=None):
+def apply_ops(table, ops, edited=None, typed_by_model=False):
     t = copy.deepcopy(table)
     edited = set(edited or ())
     changes = []
@@ -347,7 +355,7 @@ def apply_ops(table, ops, edited=None):
             continue
         before, marks = copy.deepcopy(t), set(edited)
         try:
-            res = fn(t, op, edited)
+            res = fn(t, {**op, "_typed_by_model": typed_by_model}, edited)
             msg, extra = res if isinstance(res, tuple) else (res, {})
             changes.append({"ok": True, "text": msg, **extra})
         except OpError as e:

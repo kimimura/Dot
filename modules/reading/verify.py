@@ -4,6 +4,7 @@ from collections import Counter
 from statistics import median_low
 
 import config
+from modules.reading import doc_groups
 
 
 def norm_text(s):
@@ -39,7 +40,7 @@ def _found(value, hay):
     return False
 
 
-def verify(table, text, has_text_layer, edited=None, previous=None):
+def verify(table, text, has_text_layer, edited=None, previous=None, learn_from=None):
     edited = edited or set()
     prev = (previous or {}).get("cells", {})
     cells, ok, total = {}, 0, 0
@@ -64,8 +65,22 @@ def verify(table, text, has_text_layer, edited=None, previous=None):
                 cells[key] = "ok" if seen[v] else "miss"
                 ok += 1 if seen[v] else 0
     if has_text_layer:
-        ok -= _misplaced(table, text, cells)
+        ok += _check_rows(table, text, cells, learn_from)
+    total += _blank_document_fields(table, cells, edited | {k for k, v in prev.items() if v == "edited"})
     return {"cells": cells, "verified": ok, "total": total, "checked": has_text_layer}
+
+
+def _blank_document_fields(table, cells, edited):
+    # a value printed once per document belongs on every row of that document; a gap means a page was read on its own
+    blanks, ids = 0, doc_groups.groups(table)
+    for c in (c["name"] for c in table["columns"] if c.get("kind") == "doc"):
+        filled = {g for r, g in zip(table["rows"], ids) if r.get(c)}
+        for i, (r, g) in enumerate(zip(table["rows"], ids)):
+            key = f"{i}|{c}"
+            if not r.get(c) and g in filled and key not in edited:
+                cells[key] = "blank"
+                blanks += 1
+    return blanks
 
 
 def flat_lines(text):
@@ -156,6 +171,13 @@ def row_bands(table, flat, starts):
     bands = []
     for i in range(len(table["rows"])):
         k = bisect_right(rows_at, i) - 1
+        if k >= 0 and rows_at[k] == i:
+            above = line_at[k - 1] + 1 if k else 0
+            below = line_at[k + 1] if k + 1 < len(rows_at) else min(n_lines, line_at[k] + tail + 1)
+            closed = _closing_band(table, i, rcols, flat, starts, above, line_at[k], below)
+            if closed:
+                bands.append(closed)
+                continue
         start = line_at[k] if k >= 0 else 0
         if k + 1 < len(rows_at):
             end = line_at[k + 1]
@@ -167,26 +189,204 @@ def row_bands(table, flat, starts):
     return bands
 
 
-def _misplaced(table, text, cells):
+def _closing_band(table, i, rcols, flat, starts, above, line, below):
+    # an anchor can be a row's last line (a price line, say): the row then runs from its values above down to the next row
+    pos = lambda n: starts[n] if n < len(starts) else len(flat)
+    values = [norm_text(table["rows"][i].get(c, "")) for c in rcols]
+    values = [v for v in values if len(v) >= config.VERIFY_MIN_ANCHOR]
+    up = [p for p in (flat.rfind(v, pos(above), pos(line)) for v in values) if p >= 0]
+    down = [p for p in (flat.find(v, pos(line + 1), pos(below)) for v in values) if p >= 0]
+    if len(up) <= len(down):
+        return None
+    end = line + 1
+    if i + 1 < len(table["rows"]):
+        end = _next_row_line(table["rows"][i + 1], rcols, flat, starts, line + 1, below)
+    return pos(bisect_right(starts, min(up)) - 1), pos(end)
+
+
+def _next_row_line(row, rcols, flat, starts, first, last):
+    pos = lambda n: starts[n] if n < len(starts) else len(flat)
+    hits = [p for p in (flat.find(v, pos(first), pos(last)) for v in (norm_text(row.get(c, "")) for c in rcols)
+                        if len(v) >= config.VERIFY_MIN_ANCHOR) if p >= 0]
+    return bisect_right(starts, min(hits)) - 1 if hits else first
+
+
+def strict_lines(text):
+    return [re.sub(r"\s+", "", line.lower()) for line in (text or "").splitlines()]
+
+
+def printed(value, lines, plain=None, begins=None):
+    # exact match, spaces aside: the sheet may leave out separators the PDF prints but never adds or changes characters
+    chars = re.sub(r"\s+", "", (value or "").lower())
+    plain = [norm_text(line) for line in lines] if plain is None else plain
+    want, begins = norm_text(chars), len(lines) if begins is None else begins
+    if len(want) <= 2 or any(want in have and _fits(chars, line, False, False) for line, have in zip(lines[:begins], plain)):
+        return True
+    return _runs_on(chars, lines, plain, False, 0, begins)
+
+
+def _fits(piece, line, start, end):
+    skip = "[^a-z0-9]*"
+    body = skip.join(re.escape(ch) for ch in piece)
+    return re.search(("\\A" if start else "") + skip + body + skip + ("\\Z" if end else ""), line) is not None
+
+
+def _runs_on(chars, lines, plain, at_start, first, begins=None):
+    # a value may carry on at the start of a later line: a code wrapped under a description, or onto the next page
+    want = norm_text(chars)
+    after = [k + 1 for k, ch in enumerate(chars) if "a" <= ch <= "z" or "0" <= ch <= "9"]
+    last = min(len(lines), first + config.VERIFY_WRAP_REACH) if at_start else min(len(lines), begins)
+    for i in range(first, last):
+        have = plain[i]
+        if not have:
+            continue
+        if at_start and have.startswith(want) and _fits(chars, lines[i], True, False):
+            return True
+        cuts = [len(have)] if at_start else [m for m in range(1, len(want)) if want[m - 1] == have[-1]]
+        for m in cuts:
+            if m < len(want) and have.endswith(want[:m]) and _fits(chars[:after[m - 1]], lines[i], at_start, True) \
+                    and _runs_on(chars[after[m - 1]:], lines, plain, True, i + 1):
+                return True
+    return False
+
+
+def _shape(s):
+    return re.sub(r"[0-9]", "9", re.sub(r"[a-z]", "a", s))
+
+
+def _own_lines(rows, rcols, plain):
+    # a row's own lines run from the line holding its opening value (an item code, say) to the next row's opening line
+    at = {}
+    for k, n in enumerate(plain):
+        at.setdefault(n, []).append(k)
+    first = lambda r, c: norm_text((str(r.get(c, "")).split() or [""])[0])
+    # the opening value (its first word) sits on a line of its own on the most rows, and tells rows apart
+    alone = {c: sum(1 for r in rows if first(r, c) in at) for c in rcols}
+    distinct = {c: len({first(r, c) for r in rows}) for c in rcols}
+    alike = [c for c in rcols if 2 * alone[c] >= len(rows)]
+    apart = [c for c in alike if 2 * distinct[c] >= max(distinct[x] for x in alike)]
+    lead = max(apart, key=lambda c: (round(alone[c] / len(rows), 1), distinct[c], -rcols.index(c)), default=None)
+    if not lead:
+        return [None] * len(rows)
+    opens = {first(r, lead) for r in rows} - {""}
+    own, prev = [], -1
+    # rows are printed in sheet order: each row opens at the next line holding its value
+    for r in rows:
+        hits = at.get(first(r, lead), [])
+        k = bisect_right(hits, prev)
+        if k == len(hits) or (prev >= 0 and hits[k] - prev > config.VERIFY_MAX_ROW_JUMP):
+            own.append(None)
+            continue
+        prev = s = hits[k]
+        reach = min(len(plain), s + config.VERIFY_MAX_ROW_JUMP)
+        own.append((s, next((k for k in range(s + 1, reach) if plain[k] in opens), reach)))
+    return own
+
+
+def _wrap_shapes(rows, rcols, lines, plain, own):
+    # learned from rows that kept them: the kind of line a column continues onto (a code printed under a long description)
+    seen = {}
+    for r, span in zip(rows, own):
+        if not span:
+            continue
+        s, e = span
+        mine = set(lines[s:e])
+        for c in rcols:
+            words = str(r.get(c, "")).lower().split()
+            for k in range(1, len(words)):
+                tail = "".join(words[k:])
+                if tail in mine and printed(" ".join(words[:k]), lines[s:e], plain[s:e]):
+                    seen.setdefault(c, Counter())[_shape(tail)] += 1
+                    break
+    return seen
+
+
+def _rest_of_line(row, c, plain):
+    # what follows the value on its line once the row's other values are taken off
+    n = norm_text(row.get(c, ""))
+    held = [norm_text(str(v)) for o, v in row.items() if o != c]
+    # numbers printed side by side run together, so where one ends is only clear for values with words in them
+    worded = len(n) >= config.VERIFY_MIN_ANCHOR and re.search("[a-z]", n)
+    for have in plain if worded else []:
+        i = have.find(n)
+        if i >= 0:
+            rest = have[i + len(n):]
+            cut = True
+            while rest and cut:
+                cut = max((h for h in held if h and rest.startswith(h)), key=len, default="")
+                rest = rest[len(cut):]
+            return rest
+    return None
+
+
+def _ends_early(rows, rcols, plain, own, more=()):
+    # a column whose values run to the end of their line on nearly every row lost its end where one stops short
+    rests = [{c: _rest_of_line(r, c, plain[span[0]:span[1]]) for c in rcols} if span else {} for r, span in zip(rows, own)]
+    learned = rests + [{c: _rest_of_line(r, c, plain[span[0]:span[1]]) for c in rcols} if span else {} for r, span in more]
+    early = [set() for _ in rows]
+    for c in rcols:
+        seen = [x[c] for x in learned if x.get(c) is not None]
+        if len(seen) >= config.VERIFY_MIN_WRAPS and seen.count("") >= config.VERIFY_LINE_END_SHARE * len(seen):
+            for i, x in enumerate(rests):
+                if x.get(c):
+                    early[i].add(c)
+    return early
+
+
+def _cut_short(row, lines, plain, wraps):
+    held = [norm_text(str(v)) for v in row.values()]
+    short = set()
+    for line, n in zip(lines, plain):
+        if not n or any(n in h for h in held):
+            continue
+        best = max(wraps, key=lambda c: wraps[c][_shape(line)], default=None)
+        if best and wraps[best][_shape(line)] >= config.VERIFY_MIN_WRAPS:
+            short.add(best)
+    return short
+
+
+def _check_rows(table, text, cells, learn_from=None):
     flat, starts = flat_lines(text)
     bands = row_bands(table, flat, starts) if flat else None
     if not bands:
         return 0
+    lines = strict_lines(text)
+    plain = [norm_text(line) for line in lines]
+    spans = [(bisect_right(starts, a) - 1, bisect_left(starts, b)) for a, b in bands]
     rcols = [c["name"] for c in table["columns"] if c.get("kind") != "doc"]
     per_doc = {}
     for r in table["rows"]:
         per_doc.setdefault(r.get("_doc", 0), []).append(r)
     # a value repeated on every row of its document is printed once for the whole document
     same = {(d, c) for d, rs in per_doc.items() for c in rcols if len({x.get(c, "") for x in rs}) == 1}
-    moved = 0
+    own = _own_lines(table["rows"], rcols, plain)
+    # another version of the same sheet (before a re-read, say) teaches what this one's columns usually look like
+    more = list(zip(learn_from["rows"], _own_lines(learn_from["rows"], rcols, plain))) if learn_from else []
+    wraps = _wrap_shapes(table["rows"] + [r for r, _ in more], rcols, lines, plain, own + [s for _, s in more])
+    early = _ends_early(table["rows"], rcols, plain, own, more)
+    change = 0
     for i, r in enumerate(table["rows"]):
-        a, b = bands[i]
-        hay = flat[a:b]
+        (a, b), (la, lb) = bands[i], spans[i]
+        s, e = own[i] or (la, lb)
+        # exactness only needs the text near the row; where the row sits is judged below
+        near = slice(max(0, s - config.VERIFY_WRAP_REACH), e + (0 if own[i] else config.VERIFY_WRAP_REACH))
+        # a value that starts in the row's band may wrap past its end
+        wrap = slice(la, lb + config.VERIFY_WRAP_REACH)
         for c in rcols:
-            key = f"{i}|{c}"
-            if (r.get("_doc", 0), c) in same:
+            key, state, v = f"{i}|{c}", cells.get(f"{i}|{c}"), r.get(c, "")
+            if state not in ("ok", "miss") or (r.get("_doc", 0), c) in same:
                 continue
-            if cells.get(key) == "ok" and not _found(r.get(c, ""), hay):
-                cells[key] = "elsewhere"
-                moved += 1
-    return moved
+            if state == "ok" and not (_found(v, flat[a:b]) or printed(v, lines[wrap], plain[wrap], lb - la)):
+                new = "elsewhere"
+            elif printed(v, lines[near], plain[near]):
+                new = "ok"
+            else:
+                new = "miss"
+            change += (new == "ok") - (state == "ok")
+            cells[key] = new
+        s, e = own[i] or (0, 0)
+        for c in _cut_short(r, lines[s:e], plain[s:e], wraps) | early[i]:
+            if cells.get(f"{i}|{c}") == "ok":
+                cells[f"{i}|{c}"] = "miss"
+                change -= 1
+    return change

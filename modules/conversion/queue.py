@@ -4,6 +4,7 @@ from core import ai, db, jobs, locks
 from core.ai.errors import LLMError
 from modules.conversion import convert, reread
 from modules.documents import repository as documents
+from modules.outputs import service as outputs
 
 CONVERTING = ("queued", "converting")
 log = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ def run(did):
         conn = db.connect(tries=4)
         try:
             documents.save(conn, d)
+            outputs.refresh(conn, d)
             conn.commit()
         finally:
             conn.close()

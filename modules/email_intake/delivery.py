@@ -5,7 +5,9 @@ import config
 from core import db, webhook
 from modules.conversion import queue as conversion
 from modules.documents import repository as documents
-from modules.email_intake import message, repository
+from modules.email_intake import message
+from modules.outputs import service as outputs
+from modules.submissions import repository as submissions
 
 log = logging.getLogger(__name__)
 
@@ -13,22 +15,20 @@ log = logging.getLogger(__name__)
 def _finished(rid):
     conn = db.connect(tries=3)
     try:
-        return not any(r["stage"] in conversion.CONVERTING for r in documents.list_batch(conn, rid))
+        return not any(r["stage"] in conversion.CONVERTING for r in documents.list_submission(conn, rid))
     finally:
         conn.close()
 
 
-def _results(req):
+def _results(rid):
     conn = db.connect(tries=3)
     try:
-        rows = documents.list_batch(conn, req["id"])
+        rows = documents.list_submission(conn, rid)
         for r in rows:
             r["table"] = (documents.get(conn, r["id"]) or {}).get("table") if r["stage"] == "converted" else None
+        return rows
     finally:
         conn.close()
-    # listed in the order the email carried them
-    order = {did: k for k, did in enumerate(req["doc_ids"])}
-    return sorted(rows, key=lambda r: order.get(r["id"], len(order)))
 
 
 def _send(payload):
@@ -50,18 +50,24 @@ def _send(payload):
 def run(rid):
     conn = db.connect(tries=3)
     try:
-        req = repository.get(conn, rid)
+        req = submissions.get(conn, rid)
     finally:
         conn.close()
-    if not req or req["status"] != "waiting":
+    if not req or req["source"] != "email" or req["status"] != "waiting":
         return
     deadline = time.time() + config.EMAIL_MAX_WAIT_SECONDS
     while not _finished(rid) and time.time() < deadline:
         time.sleep(config.EMAIL_POLL_SECONDS)
-    status, error = _send(message.build(_results(req), req["stamp"], req["sender"]))
+    docs = _results(rid)
+    status, error = _send(message.build(docs, req["stamp"], req["sender"]))
     conn = db.connect(tries=3)
     try:
-        repository.finish(conn, rid, status, error)
+        submissions.finish(conn, rid, status, error)
+        if status == "sent":
+            for r in docs:
+                d = documents.get(conn, r["id"])
+                if d:
+                    outputs.mark_sent(conn, d)
         conn.commit()
     finally:
         conn.close()

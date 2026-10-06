@@ -4,6 +4,7 @@ from flask import abort
 
 from core import db, locks
 from modules.documents import repository as documents, view
+from modules.outputs import service as outputs
 
 log = logging.getLogger(__name__)
 
@@ -24,11 +25,13 @@ def run(doc_id, fn):
             result = fn(conn, d)
             d, changes = result if isinstance(result, tuple) else (result, [])
             try:
+                outputs.refresh(conn, d)
                 conn.commit()
             except Exception:
                 conn.close()
                 conn = db.connect(tries=4)
                 documents.save(conn, d)
+                outputs.refresh(conn, d)
                 conn.commit()
                 log.warning("reconnected to save %s", doc_id)
             env = view.envelope(conn, d, changes)

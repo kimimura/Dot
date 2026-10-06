@@ -1,6 +1,7 @@
 from core import jobs
 from modules.companion import dialogue
 from modules.profiles import repository as profiles
+from modules.submissions import repository as submissions
 
 
 def options_for(conn, d):
@@ -54,12 +55,14 @@ def envelope(conn, d, changes=None):
     last_bot = next((t for t in reversed(d["transcript"]) if t["who"] == "bot"), None)
     options, inp = options_for(conn, d)
     prof = profiles.get(conn, d["profile_id"]) if d.get("profile_id") else None
+    sub = submissions.get(conn, d["submission_id"]) if d.get("submission_id") else None
     return {
         "doc": {
             "id": d["id"], "filename": d["filename"], "stage": d["stage"], "error": d.get("error"),
             "n_pages": d["n_pages"], "uploaded_at": d["uploaded_at"], "confirmed_at": d.get("confirmed_at"),
             "has_text_layer": d["has_text_layer"], "profile_id": d.get("profile_id"),
             "profile_name": prof["name"] if prof else None, "duplicate_of": d.get("duplicate_of"),
+            "source": sub["source"] if sub else None, "sender": sub["sender"] if sub else None,
             "xlsx_url": f"/api/docs/{d['id']}/download.xlsx" if d.get("table") else None,
             "csv_url": f"/api/docs/{d['id']}/download.csv" if d.get("table") else None,
             "can_undo": bool(d.get("history")), "hints": d.get("hints", []), "extra_fields": d.get("extra_fields") or {},

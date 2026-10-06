@@ -1,11 +1,14 @@
-from core import pdftext
+from core import db, pdftext
 from modules.documents import repository as documents, transcript
 from modules.profiles import matching, repository as profiles
+from modules.submissions import repository as submissions
 
 
 def on_upload(conn, pdf, filename):
     info = pdftext.inspect(pdf)
-    d = documents.create(conn, filename, info)
+    sid = db.new_id()
+    submissions.create(conn, sid, "builder")
+    d = documents.create(conn, filename, info, sid)
     transcript.bot(d, "reading", filename=filename)
     dup = documents.by_sha(conn, info.sha256, exclude=d["id"])
     if dup:

@@ -11,8 +11,15 @@ from core.errors import Refused
 from modules.conversion import intake, queue as conversion
 from modules.documents import repository as documents, work
 from modules.profiles import repository as profiles
+from modules.submissions import repository as submissions
 
 STARTED = "Already converting — can't remove it now."
+CONVERTED_IN_BULK = ("upload", "email")
+
+
+def _in_bulk(conn, d):
+    s = submissions.get(conn, d.get("submission_id")) if d.get("submission_id") else None
+    return bool(s) and s["source"] in CONVERTED_IN_BULK
 
 
 def accept(files, batch_id):
@@ -21,6 +28,8 @@ def accept(files, batch_id):
         raise Refused(400, "bad batch", "That batch id isn't valid.")
     conn = db.connect()
     try:
+        if not submissions.get(conn, bid):
+            submissions.create(conn, bid, "upload")
         ids, rejected = intake.store(conn, files, bid)
         conn.commit()
     finally:
@@ -64,7 +73,7 @@ def csv_result(did):
 def batch_status(bid):
     conn = db.connect()
     try:
-        files = documents.list_batch(conn, bid)
+        files = documents.list_submission(conn, bid)
     finally:
         conn.close()
     for f in files:
@@ -78,7 +87,7 @@ def batch_status(bid):
 def batch_zip(bid):
     conn = db.connect()
     try:
-        docs = [documents.get(conn, f["id"]) for f in documents.list_batch(conn, bid) if f["stage"] == "converted"]
+        docs = [documents.get(conn, f["id"]) for f in documents.list_submission(conn, bid) if f["stage"] == "converted"]
     finally:
         conn.close()
     docs = [d for d in docs if d and d.get("table")]
@@ -101,7 +110,7 @@ def retry(doc_id):
     conn = db.connect()
     try:
         d = work.load_or_404(conn, doc_id)
-        if d["stage"] != "failed" or not d.get("batch_id"):
+        if d["stage"] != "failed" or not _in_bulk(conn, d):
             raise Refused(400, "not failed", "Only failed conversions can be retried.")
         d["stage"], d["error"] = "queued", None
         documents.save(conn, d)
@@ -120,7 +129,7 @@ def cancel(doc_id):
         conn = db.connect()
         try:
             d = work.load_or_404(conn, doc_id)
-            if d["stage"] not in ("queued", "failed") or not d.get("batch_id"):
+            if d["stage"] not in ("queued", "failed") or not _in_bulk(conn, d):
                 raise Refused(409, "started", STARTED)
             documents.delete(conn, doc_id)
             conn.commit()

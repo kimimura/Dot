@@ -17,11 +17,16 @@ class Unreachable(Exception):
     pass
 
 
-def schema():
-    out = []
-    for f in sorted(config.MIGRATIONS.glob("*.sql")):
-        out += [b.strip() for b in re.split(r"(?im)^\s*GO\s*$", f.read_text(encoding="utf-8")) if b.strip()]
-    return out
+APPLIED_TABLE = ("IF OBJECT_ID('schema_migrations', 'U') IS NULL "
+                 "CREATE TABLE schema_migrations (name NVARCHAR(200) NOT NULL PRIMARY KEY, applied_at NVARCHAR(32) NOT NULL)")
+
+
+def statements(path):
+    return [b.strip() for b in re.split(r"(?im)^\s*GO\s*$", path.read_text(encoding="utf-8")) if b.strip()]
+
+
+def pending(applied):
+    return [f for f in sorted(config.MIGRATIONS.glob("*.sql")) if f.name not in applied]
 
 
 def configured():
@@ -113,8 +118,12 @@ def connect(tries=1):
 def init_db():
     raw = pyodbc.connect(conn_str(), autocommit=True)
     try:
-        for stmt in schema():
-            raw.execute(stmt)
+        raw.execute(APPLIED_TABLE)
+        applied = {r[0] for r in raw.execute("SELECT name FROM schema_migrations").fetchall()}
+        for f in pending(applied):
+            for stmt in statements(f):
+                raw.execute(stmt)
+            raw.execute("INSERT INTO schema_migrations(name, applied_at) VALUES (?, ?)", f.name, now())
     finally:
         raw.close()
 

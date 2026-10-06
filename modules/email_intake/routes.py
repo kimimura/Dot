@@ -8,5 +8,6 @@ bp = Blueprint("email_intake", __name__)
 @bp.post("/api/email/intake")
 def intake():
     service.check_token(request.headers.get("Token"))
-    reply, status = service.receive(request.get_json(silent=True))
+    body = request.get_json(silent=True)
+    reply, status = service.receive(body if body is not None else service.loose_json(request.get_data(as_text=True)))
     return jsonify(reply), status

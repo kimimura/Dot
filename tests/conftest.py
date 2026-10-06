@@ -1,6 +1,7 @@
 import copy
 import math
 import os
+import queue
 import sys
 import time
 from pathlib import Path
@@ -12,9 +13,10 @@ sys.path.insert(0, str(ROOT))
 os.environ["LLM_PROVIDER"] = "offline"
 
 from modules.documents import repository as documents  # noqa: E402
-from modules.email_intake import repository as email_requests  # noqa: E402
+from modules.outputs import repository as outputs  # noqa: E402
 from modules.profiles import repository as profiles  # noqa: E402
-from core import ai, db, pdftext  # noqa: E402
+from modules.submissions import repository as submissions  # noqa: E402
+from core import ai, db, jobs, pdftext  # noqa: E402
 import pdfgen  # noqa: E402
 
 
@@ -35,20 +37,27 @@ class FakeConn:
 class FakeDb:
     # in-memory stand-in for SQL Server: same functions, same document and profile shapes
     def __init__(self):
-        self.docs, self.pdfs, self.profiles, self.emails = {}, {}, {}, {}
+        self.docs, self.pdfs, self.profiles, self.submissions, self.outputs = {}, {}, {}, {}, {}
 
-    def add_email(self, conn, rid, sender, stamp, doc_ids):
-        self.emails[rid] = {"id": rid, "sender": sender, "received_at": db.now(), "stamp": stamp, "doc_ids": list(doc_ids),
-                            "status": "waiting", "error": None, "sent_at": None}
+    def add_submission(self, conn, sid, source, sender="", stamp=None, status=None):
+        assert sid not in self.submissions, "submission ids are unique"
+        self.submissions[sid] = {"id": sid, "source": source, "sender": sender, "received_at": db.now(),
+                                 "stamp": stamp, "status": status, "error": None, "sent_at": None}
 
-    def finish_email(self, conn, rid, status, error=None):
-        self.emails[rid].update(status=status, error=error, sent_at=db.now())
+    def finish_submission(self, conn, sid, status, error=None):
+        self.submissions[sid].update(status=status, error=error, sent_at=db.now())
 
-    def create(self, conn, filename, info, batch_id=None, stage="identify"):
+    def new_document(self, filename, info):
+        sid = db.new_id()
+        self.add_submission(None, sid, "builder")
+        return self.create(None, filename, info, sid)
+
+    def create(self, conn, filename, info, submission_id, stage="identify", position=0):
+        assert submission_id in self.submissions, "a document needs its submission first"
         d = {"id": db.new_id(), "filename": filename, "sha256": info.sha256, "size": info.size, "n_pages": info.n_pages,
              "uploaded_at": db.now(), "confirmed_at": None, "stage": stage, "error": None, "profile_id": None,
-             "has_text_layer": info.has_text_layer, "n_rows": 0, "verified_pct": None, "batch_id": batch_id, "auto_how": None,
-             "read_note": None}
+             "has_text_layer": info.has_text_layer, "n_rows": 0, "verified_pct": None, "submission_id": submission_id,
+             "position": position, "auto_how": None, "read_note": None}
         for k, v in documents.STATE_DEFAULTS.items():
             d[k] = copy.deepcopy(v)
         d["tokens"], d["structural"] = info.tokens, info.structural
@@ -74,10 +83,10 @@ class FakeDb:
             hits.sort(key=lambda d: d["stage"] != "confirmed")
         return copy.deepcopy(hits[0]) if hits else None
 
-    def list_batch(self, conn, bid):
+    def list_submission(self, conn, sid):
         out = []
-        for d in sorted(self.docs.values(), key=lambda d: (d["uploaded_at"], d["filename"])):
-            if d.get("batch_id") == bid:
+        for d in sorted(self.docs.values(), key=lambda d: (d["position"], d["uploaded_at"], d["filename"])):
+            if d.get("submission_id") == sid:
                 row = {k: d.get(k) for k in ("id", "filename", "stage", "error", "n_pages", "n_rows", "verified_pct",
                                              "has_text_layer", "profile_id", "auto_how", "read_note", "uploaded_at")}
                 row["profile_name"] = (self.profiles.get(d.get("profile_id")) or {}).get("name")
@@ -92,6 +101,8 @@ class FakeDb:
             row = {k: d.get(k) for k in ("id", "filename", "uploaded_at", "confirmed_at", "stage", "profile_id", "n_pages",
                                          "n_rows", "verified_pct", "has_text_layer")}
             row["profile_name"] = (self.profiles.get(d.get("profile_id")) or {}).get("name")
+            sub = self.submissions.get(d.get("submission_id")) or {}
+            row["source"], row["sender"] = sub.get("source"), sub.get("sender")
             row["has_output"] = d["stage"] in ("confirmed", "converted", "rereading")
             out.append(row)
         return out[:limit]
@@ -125,7 +136,7 @@ class FakeDb:
         mp.setattr(documents, "by_sha", lambda conn, sha, exclude=None: self._latest(sha, exclude))
         mp.setattr(documents, "reusable", lambda conn, sha, exclude=None: self._latest(sha, exclude, ("confirmed", "converted")))
         mp.setattr(documents, "delete", lambda conn, did: (self.docs.pop(did, None), self.pdfs.pop(did, None)))
-        mp.setattr(documents, "list_batch", self.list_batch)
+        mp.setattr(documents, "list_submission", self.list_submission)
         mp.setattr(documents, "list_docs", self.list_docs)
         mp.setattr(documents, "confirmed_ids", self.confirmed_ids)
         mp.setattr(documents, "pending", lambda conn: [d["id"] for d in self.docs.values() if d["stage"] in ("queued", "converting", "rereading")])
@@ -141,17 +152,34 @@ class FakeDb:
         mp.setattr(profiles, "save", lambda conn, p: self.profiles.__setitem__(p["id"], copy.deepcopy(p)))
         mp.setattr(profiles, "create", self.create_profile)
         mp.setattr(profiles, "delete", lambda conn, pid: self.profiles.pop(pid, None))
-        mp.setattr(email_requests, "create", self.add_email)
-        mp.setattr(email_requests, "get", lambda conn, rid: copy.deepcopy(self.emails.get(rid)))
-        mp.setattr(email_requests, "waiting", lambda conn: [r for r, e in self.emails.items() if e["status"] == "waiting"])
-        mp.setattr(email_requests, "finish", self.finish_email)
+        mp.setattr(submissions, "create", self.add_submission)
+        mp.setattr(submissions, "get", lambda conn, sid: copy.deepcopy(self.submissions.get(sid)))
+        mp.setattr(submissions, "waiting_emails", lambda conn: [k for k, s in self.submissions.items()
+                                                                if s["source"] == "email" and s["status"] == "waiting"])
+        mp.setattr(submissions, "finish", self.finish_submission)
+        mp.setattr(outputs, "get", lambda conn, did, version: copy.deepcopy(self.outputs.get((did, version))))
+        mp.setattr(outputs, "save_current", lambda conn, did, chain, at, data: self.outputs.__setitem__((did, "current"), copy.deepcopy(data)))
+        mp.setattr(outputs, "keep_sent", lambda conn, did, chain, at, data: self.outputs.setdefault((did, "sent"), copy.deepcopy(data)))
+        mp.setattr(outputs, "clear_current", lambda conn, did: self.outputs.pop((did, "current"), None))
         mp.setattr(ai, "get_llm", lambda: ai.OfflineAdapter())
         return self
 
 
 @pytest.fixture
 def fake_db(monkeypatch):
-    return FakeDb().install(monkeypatch)
+    yield FakeDb().install(monkeypatch)
+    # background work a test left behind must not outlive its fake database and reach the real one
+    left = []
+    while True:
+        try:
+            left.append(jobs._q.get_nowait()[0])
+        except queue.Empty:
+            break
+    with jobs._guard:
+        jobs._queued.difference_update(left)
+    end = time.time() + 30
+    while (jobs._queued or jobs._active) and time.time() < end:
+        time.sleep(0.02)
 
 
 @pytest.fixture

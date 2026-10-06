@@ -1,18 +1,28 @@
 import base64
 import binascii
 import hmac
+import json
 import time
 
 import config
 from core import db, jobs
 from core.errors import Refused
 from modules.conversion import intake, queue as conversion
-from modules.email_intake import delivery, repository
+from modules.email_intake import delivery
+from modules.submissions import repository as submissions
 
 
 def check_token(given):
     if not config.EMAIL_INTAKE_TOKEN or not hmac.compare_digest((given or "").strip(), config.EMAIL_INTAKE_TOKEN):
         raise Refused(403, "unauthorized", "Not allowed.")
+
+
+def loose_json(text):
+    # a mail flow pastes the email's preview in as-is, so its line breaks can arrive unescaped inside a string
+    try:
+        return json.loads(text, strict=False)
+    except ValueError:
+        return None
 
 
 def _decode(content):
@@ -45,9 +55,10 @@ def receive(body):
     rid, stamp = db.new_id(), time.strftime(config.EMAIL_STAMP_FORMAT)
     conn = db.connect()
     try:
+        submissions.create(conn, rid, "email", sender=str(body.get("email") or ""), stamp=stamp, status="waiting")
         ids, rejected = intake.store(conn, pairs, rid)
-        if ids:
-            repository.create(conn, rid, str(body.get("email") or ""), stamp, ids)
+        if not ids:
+            submissions.finish(conn, rid, "rejected", "no readable PDF")
         conn.commit()
     finally:
         conn.close()
@@ -68,7 +79,7 @@ def resume():
     try:
         conn = db.connect()
         try:
-            rids = repository.waiting(conn)
+            rids = submissions.waiting_emails(conn)
         finally:
             conn.close()
     except Exception:

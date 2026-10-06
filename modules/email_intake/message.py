@@ -1,4 +1,3 @@
-import base64
 import html
 import re
 from collections import Counter
@@ -27,7 +26,7 @@ def _file_names(docs, labels, stamp):
             continue
         seen[label] += 1
         base = config.EMAIL_FILE_NAME.format(format=_safe(label), stamp=stamp)
-        names.append(f"{base}_{seen[label]}.xlsx" if totals[label] > 1 else f"{base}.xlsx")
+        names.append(f"{base}_{seen[label]}.csv" if totals[label] > 1 else f"{base}.csv")
     return names
 
 
@@ -41,8 +40,9 @@ def build(docs, stamp, sender):
         if name:
             rows = len(d["table"]["rows"])
             line += "<br>" + html.escape(config.EMAIL_FILE_LINE.format(rows=rows, s="" if rows == 1 else "s", file=name))
-            data = sheets.xlsx_bytes(d["table"], _safe(label)).getvalue()
-            attachments.append({"Name": name, "ContentBytes": base64.b64encode(data).decode("ascii")})
+            # the mail step attaches this text as it is, so the file goes as plain CSV text rather than encoded bytes
+            text = sheets.csv_bytes(d["table"]).getvalue().decode("utf-8-sig")
+            attachments.append({"Name": name, "ContentBytes": text})
         parts.append(line + "</p>")
     return {"subject": subject, "body": "".join(parts), "attachments": attachments, "to": sender,
             "delivered_count": len(attachments), "held_count": 0, "failed_count": len(docs) - len(attachments)}

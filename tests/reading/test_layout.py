@@ -183,7 +183,7 @@ def test_a_format_learns_from_its_confirmed_files_the_first_time_it_is_used(fake
     pdf, sheet, _ = trained
     p = fake_db.add_profile("BECON", pdfgen.PO_COLUMNS, pdf)
     info = pdftext.inspect(pdf)
-    d = fake_db.create(None, "po-231020.pdf", info)
+    d = fake_db.new_document("po-231020.pdf", info)
     d.update(stage="confirmed", confirmed_at=db.now(), profile_id=p["id"], table=sheet)
     fake_db.save(None, d)
     fake_db.pdfs[d["id"]] = pdf
@@ -195,7 +195,7 @@ def test_a_format_learns_from_its_confirmed_files_the_first_time_it_is_used(fake
 def test_confirming_a_file_teaches_its_layout(fake_db, trained, monkeypatch):
     pdf, sheet, _ = trained
     p = fake_db.add_profile("BECON", pdfgen.PO_COLUMNS, pdf)
-    d = fake_db.create(None, "po-231020.pdf", pdftext.inspect(pdf))
+    d = fake_db.new_document("po-231020.pdf", pdftext.inspect(pdf))
     d.update(stage="save_ask", table=sheet, hints=[])
     fake_db.pdfs[d["id"]] = pdf
     saving.confirm(None, d, profile_id=p["id"])

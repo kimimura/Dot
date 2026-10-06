@@ -1,9 +1,9 @@
 import base64
+import csv
 import io
 import time
 
 import pytest
-from openpyxl import load_workbook
 
 import config
 from conftest import wait_for
@@ -35,12 +35,11 @@ def send(client, files, token=TOKEN):
 
 
 def only_email(fake_db):
-    return next(iter(fake_db.emails.values()))
+    return next(s for s in fake_db.submissions.values() if s["source"] == "email")
 
 
 def sheet_rows(attachment):
-    ws = load_workbook(io.BytesIO(base64.b64decode(attachment["ContentBytes"]))).active
-    return [[c.value for c in r] for r in ws.iter_rows()]
+    return list(csv.reader(io.StringIO(attachment["ContentBytes"])))
 
 
 def test_pdfs_from_an_email_come_back_as_sheets_named_by_format(client, fake_db, sent, acme_pdf, acme2_pdf, orbit_pdf):
@@ -51,11 +50,18 @@ def test_pdfs_from_an_email_come_back_as_sheets_named_by_format(client, fake_db,
                                                      "skipped": [{"file": "logo.png", "reason": "Not a PDF."}]}
     payload, stamp = wait_for(lambda: sent and sent[0]), only_email(fake_db)["stamp"]
     assert payload["subject"] == "3 PDFs Received" and payload["to"] == "sender@example.com"
-    assert [a["Name"] for a in payload["attachments"]] == [f"ACME_SalesOrder_{stamp}_1.xlsx", f"ACME_SalesOrder_{stamp}_2.xlsx",
-                                                            f"Unidentified_SalesOrder_{stamp}.xlsx"]
+    assert [a["Name"] for a in payload["attachments"]] == [f"ACME_SalesOrder_{stamp}_1.csv", f"ACME_SalesOrder_{stamp}_2.csv",
+                                                            f"Unidentified_SalesOrder_{stamp}.csv"]
     assert "a.pdf – ACME" in payload["body"] and "c.pdf – Unidentified" in payload["body"]
-    assert sheet_rows(payload["attachments"][1]) == [["Invoice No", "Item", "Qty"], ["INV-2026-0107", "A300", 3]]
+    assert sheet_rows(payload["attachments"][1]) == [["Invoice No", "Item", "Qty"], ["INV-2026-0107", "A300", "3"]]
     assert only_email(fake_db)["status"] == "sent" and len(sent) == 1
+
+
+def test_an_email_preview_with_raw_line_breaks_is_still_read(client, fake_db, sent, acme_pdf):
+    raw = '{"type": "Dot\r\nRegards,\r\nBrian", "email": "sender@example.com", "files": [{"filename": "a.pdf", "content": "%s"}]}' % b64(acme_pdf)
+    r = client.post("/api/email/intake", data=raw, headers={"Token": TOKEN, "Content-Type": "application/json"})
+    assert r.status_code == 200 and r.get_json()["count"] == 1
+    assert wait_for(lambda: sent and sent[0])["subject"] == "1 PDF Received"
 
 
 def test_files_are_listed_in_the_order_the_email_carried_them(client, fake_db, sent, acme_pdf, acme2_pdf):
@@ -68,13 +74,13 @@ def test_files_are_listed_in_the_order_the_email_carried_them(client, fake_db, s
 def test_without_the_right_token_nothing_is_taken_in(client, fake_db, sent, monkeypatch, acme_pdf, token, configured):
     monkeypatch.setattr(config, "EMAIL_INTAKE_TOKEN", configured)
     r = send(client, [{"filename": "a.pdf", "content": b64(acme_pdf)}], token=token)
-    assert r.status_code == 403 and not fake_db.docs and not fake_db.emails
+    assert r.status_code == 403 and not fake_db.docs and not fake_db.submissions
 
 
 def test_an_email_without_a_readable_pdf_is_turned_away(client, fake_db, sent):
     r = send(client, [{"filename": "logo.png", "content": b64(b"png")}, {"filename": "x.pdf", "content": b64(b"not a pdf")}])
     assert r.status_code == 415 and r.get_json()["status"] == "rejected" and len(r.get_json()["skipped"]) == 2
-    assert not fake_db.emails and not sent
+    assert only_email(fake_db)["status"] == "rejected" and not fake_db.docs and not sent
     assert send(client, []).status_code == 400
 
 
@@ -121,6 +127,6 @@ def test_the_message_uses_safe_file_names_and_plain_wording():
     docs = [{"filename": "<x>.pdf", "stage": "converted", "profile_name": "PO/ACME", "table": table},
             {"filename": "y.pdf", "stage": "converting", "profile_name": None, "table": None}]
     p = message.build(docs, "20261223_140031", "s@example.com")
-    assert p["subject"] == "2 PDFs Received" and [a["Name"] for a in p["attachments"]] == ["PO-ACME_SalesOrder_20261223_140031.xlsx"]
-    assert "&lt;x&gt;.pdf – PO/ACME</b><br>1 line · PO-ACME_SalesOrder_20261223_140031.xlsx" in p["body"]
+    assert p["subject"] == "2 PDFs Received" and [a["Name"] for a in p["attachments"]] == ["PO-ACME_SalesOrder_20261223_140031.csv"]
+    assert "&lt;x&gt;.pdf – PO/ACME</b><br>1 line · PO-ACME_SalesOrder_20261223_140031.csv" in p["body"]
     assert "y.pdf – Still processing</b></p>" in p["body"]

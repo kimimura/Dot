@@ -117,6 +117,15 @@ STATS_TOP_FORMATS = 8
 STATS_WEEK_DAYS = 7
 STATS_CHART_DAYS = 14
 
+# ── standard output ──────────────────────────────────────────────────────────
+OUTPUT_ORDER_FIELDS = ["order_number", "store_code", "ship_to_code", "order_date", "delivery_date", "fax", "phone", "email",
+                       "grand_total"]
+OUTPUT_ROW_FIELDS = ["item_code", "item_desc", "barcode", "qty_unit", "conversion", "order_qty", "uom", "unit_price", "amount"]
+OUTPUT_REQUIRED_FIELDS = ["order_number", "item_code", "order_qty"]
+OUTPUT_DATE_ORDERS = ["dmy", "mdy", "ymd"]
+OUTPUT_DATE_ORDER_DEFAULT = "dmy"
+OUTPUT_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+
 # ── email intake ─────────────────────────────────────────────────────────────
 EMAIL_INTAKE_TOKEN = env("EMAIL_INTAKE_TOKEN")
 EMAIL_ALERT_URL = env("EMAIL_ALERT_URL")

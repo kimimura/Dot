@@ -1,5 +1,6 @@
 .env
 data/
+misc/
 __pycache__/
 *.pyc
 il_570xN.6292052685_9mfh.webp

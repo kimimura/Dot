@@ -123,15 +123,21 @@ def _tokenise(picked):
     return out
 
 
-def _spaced(tp):
+class PageText(str):
+    # a page's text that also knows where each word starts and ends across the page, for telling columns and wrapped lines apart
+    edges = None
+
+
+def _spaced(tp, width):
     # some PDFs leave out the space between words: a gap between two letters' full widths marks one
     text = tp.get_text_range() or ""
     if len(text) != tp.count_chars():
-        return text
-    out, prev = [], None
+        return text, None
+    out, spans, prev = [], [], None
     for i, ch in enumerate(text):
         if ch in "\r\n" or ch.isspace():
             out.append(ch)
+            spans.append(None)
             prev = None
             continue
         box = tp.get_charbox(i, loose=True)
@@ -139,9 +145,23 @@ def _spaced(tp):
             h = max(box[3] - box[1], prev[3] - prev[1], 1e-6)
             if box[0] - prev[2] > config.PDF_WORD_GAP * h and abs(box[1] - prev[1]) < h:
                 out.append(" ")
+                spans.append(None)
         out.append(ch)
+        spans.append((box[0] / width, box[2] / width))
         prev = box
-    return "".join(out)
+    return "".join(out), spans
+
+
+def _word_edges(text, spans):
+    # where each word starts and ends across the page (0 = left edge, 1 = right edge), line by line as the text splits into words
+    lines, at = [], 0
+    for line in text.splitlines(keepends=True):
+        words = [(spans[at + m.start()][0], spans[at + m.end() - 1][1]) for m in re.finditer(r"\S+", line)
+                 if spans[at + m.start()] and spans[at + m.end() - 1]]
+        if line.split():
+            lines.append(words if len(words) == len(line.split()) else None)
+        at += len(line)
+    return lines
 
 
 def page_texts(data):
@@ -151,7 +171,10 @@ def page_texts(data):
         for i in range(len(doc)):
             page = doc[i]
             tp = page.get_textpage()
-            out.append(_spaced(tp))
+            text, spans = _spaced(tp, page.get_width() or 1)
+            page_text = PageText(text)
+            page_text.edges = _word_edges(text, spans) if spans else None
+            out.append(page_text)
             tp.close()
             page.close()
         return out

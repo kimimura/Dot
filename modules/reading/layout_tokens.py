@@ -18,7 +18,9 @@ def token_class(tok):
 
 
 def class_pattern(c):
-    return rf"\d{{{c[4:]}}}" if c.startswith("INT:") else PATTERN[c]
+    if c.startswith("INT:"):
+        return rf"\d{{{c[4:].replace('-', ',')}}}"
+    return PATTERN[c]
 
 
 def tidy_classes(p, widen=False):
@@ -31,8 +33,31 @@ def tidy_classes(p, widen=False):
     return sorted(p)
 
 
+class Lines(list):
+    # the text's lines as (page, words), also knowing where each word starts and ends when the PDF said
+    edges = None
+
+
 def split_lines(texts):
-    return [(p, line.split()) for p, t in enumerate(texts) for line in (t or "").splitlines() if line.split()]
+    out = Lines((p, line.split()) for p, t in enumerate(texts) for line in (t or "").splitlines() if line.split())
+    out.edges = line_edges(texts)
+    return out
+
+
+def line_edges(texts):
+    # where each word of split_lines starts and ends across the page; None where the PDF didn't say
+    out = []
+    for t in texts:
+        rows = [line.split() for line in (t or "").splitlines() if line.split()]
+        known = getattr(t, "edges", None)
+        if not known or len(known) != len(rows):
+            known = [None] * len(rows)
+        out += [e if e and len(e) == len(r) else [None] * len(r) for e, r in zip(known, rows)]
+    return out
+
+
+def line_middles(texts):
+    return [[None if e is None else (e[0] + e[1]) / 2 for e in line] for line in line_edges(texts)]
 
 
 def mask_token(tok):
@@ -69,6 +94,25 @@ def _take(toks, s, after, n):
     return toks[s:stop] if stop else []
 
 
+def wrapped(rule, lines, L, v):
+    # a value running to the line end carries on to the next line when that line's first word could not have fitted
+    # and is not how the part after the value opens
+    box, edges = rule.get("wrap"), getattr(lines, "edges", None)
+    if not box or not edges or not v:
+        return v
+    out, j = list(v), L
+    while j + 1 < len(lines) and lines[j + 1][0] == lines[j][0]:
+        cur, nxt = edges[j], edges[j + 1]
+        if None in cur or None in nxt or abs(nxt[0][0] - box["left"]) > config.LAYOUT_WRAP_MARGIN:
+            break
+        space = min((b[0] - a[1] for a, b in zip(cur, cur[1:])), default=0)
+        if cur[-1][1] + space + nxt[0][1] - nxt[0][0] <= box["right"] or mask_token(lines[j + 1][1][0]) in box["stops"]:
+            break
+        out += lines[j + 1][1]
+        j += 1
+    return out
+
+
 def apply_rule(rule, lines, where=False):
     if "block" in rule:
         out = []
@@ -84,10 +128,17 @@ def apply_rule(rule, lines, where=False):
                     out.append((L, " ".join(part)) if where else " ".join(part))
         return out
     after, n, out = rule["after"], rule["n"], []
+    if "under" in rule:
+        for L in range(len(lines) - rule["skip"]):
+            if mask_line(lines[L][1]) == rule["under"]:
+                v = wrapped(rule, lines, L + rule["skip"], _take(lines[L + rule["skip"]][1], 0, after, n))
+                if v:
+                    out.append((L + rule["skip"], " ".join(v)) if where else " ".join(v))
+        return out
     if "above" in rule:
         for L in range(1, len(lines)):
             if mask_line(lines[L - 1][1]) == rule["above"]:
-                v = _take(lines[L][1], rule["s"], after, n)
+                v = wrapped(rule, lines, L, _take(lines[L][1], rule["s"], after, n))
                 if v:
                     out.append((L, " ".join(v)) if where else " ".join(v))
         return out
@@ -98,7 +149,7 @@ def apply_rule(rule, lines, where=False):
         for s in ([len(c)] if anchored else range(len(c), len(toks))):
             if s > len(toks) - 1 or not all((x == "#" and mask_token(t) == "#") or x == t for x, t in zip(c, toks[s - len(c):s])):
                 continue
-            v = _take(toks, s, after, n)
+            v = wrapped(rule, lines, L, _take(toks, s, after, n))
             if v:
                 out.append((L, " ".join(v)) if where else " ".join(v))
     return out

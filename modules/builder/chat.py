@@ -6,7 +6,7 @@ from core import pdftext
 from core.ai.errors import LLMError, Truncated
 from modules.builder import chat_prompt
 from modules.builder.answers import on_answer
-from modules.builder.edits import alias_hints, column_notes
+from modules.builder.edits import alias_hints, column_notes, settle_hints
 from modules.builder.review import ask_review
 from modules.builder.saving import after_yes
 from modules.companion import dialogue
@@ -71,6 +71,7 @@ def _apply_revision(conn, llm, d, pdf, reply, op_list, new_hints, message="", fo
                 hints.append({"scope": "col", "col": str(o.get("col")), "text": 'Do not extract "%s"' % o.get("col"), "dropped": True})
         table, ch, edited = table_ops.apply_ops(table, other, edited, typed_by_model=True)
         changes += ch
+        hints = settle_hints(hints, other, ch, table)
     verification = verify.verify(table, pdftext.text_of(pdf), d["has_text_layer"], edited=edited)
 
     danger = None if forced else _shrink(before, table)

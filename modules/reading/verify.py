@@ -309,7 +309,7 @@ def _wrap_shapes(rows, rcols, lines, plain, own):
 def _rest_of_line(row, c, plain):
     # what follows the value on its line once the row's other values are taken off
     n = norm_text(row.get(c, ""))
-    held = [norm_text(str(v)) for o, v in row.items() if o != c]
+    held = [norm_text(str(v)) for o, v in row.items() if o != c and not o.startswith("_")]
     # numbers printed side by side run together, so where one ends is only clear for values with words in them
     worded = len(n) >= config.VERIFY_MIN_ANCHOR and re.search("[a-z]", n)
     for have in plain if worded else []:
@@ -335,11 +335,15 @@ def _line_end_columns(rows, rcols, plain, own):
     return ends
 
 
-def _cut_short(row, lines, plain, wraps):
-    held = [norm_text(str(v)) for v in row.values()]
+def _cut_short(row, lines, plain, wraps, following=None):
+    held = [norm_text(str(v)) for k, v in row.items() if not k.startswith("_")]
+    # the next row may open just before this one's lines end (a line number, a code printed above its item)
+    theirs = [norm_text(str(v)) for k, v in (following or {}).items() if not k.startswith("_")]
     short = set()
     for line, n in zip(lines, plain):
         if not n or any(n in h for h in held):
+            continue
+        if any(n == h or (len(h) >= config.VERIFY_MIN_ANCHOR and h in n) for h in theirs if h):
             continue
         best = max(wraps, key=lambda c: wraps[c][_shape(line)], default=None)
         if best and wraps[best][_shape(line)] >= config.VERIFY_MIN_WRAPS:
@@ -366,7 +370,7 @@ def read_rows(table, text, learn_from=None):
     more = list(zip(learn_from["rows"], _own_lines(learn_from["rows"], rcols, plain))) if learn_from else []
     seen_rows, seen_own = table["rows"] + [r for r, _ in more], own + [s for _, s in more]
     return {"flat": flat, "lines": lines, "plain": plain, "printed": [" ".join(x.split()) for x in text.splitlines()],
-            "rcols": rcols, "own": own, "bands": bands, "spans": spans,
+            "rcols": rcols, "own": own, "bands": bands, "spans": spans, "rows": table["rows"],
             "wraps": _wrap_shapes(seen_rows, rcols, lines, plain, seen_own), "ends": _line_end_columns(seen_rows, rcols, plain, seen_own)}
 
 
@@ -382,7 +386,8 @@ def short_columns(ctx, i, row):
         return set()
     s, e = ctx["own"][i]
     lines, plain = ctx["lines"][s:e], ctx["plain"][s:e]
-    return _cut_short(row, lines, plain, ctx["wraps"]) | {c for c in ctx["ends"] if _rest_of_line(row, c, plain)}
+    following = ctx["rows"][i + 1] if i + 1 < len(ctx["rows"]) else None
+    return _cut_short(row, lines, plain, ctx["wraps"], following) | {c for c in ctx["ends"] if _rest_of_line(row, c, plain)}
 
 
 def fits(ctx, i, row, c, value):

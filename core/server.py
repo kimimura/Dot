@@ -3,7 +3,7 @@ import logging
 from waitress import serve
 
 import config
-from core import ai, db
+from core import ai, db, inflight
 
 
 class BusyNote(logging.Filter):
@@ -11,13 +11,15 @@ class BusyNote(logging.Filter):
     def filter(self, record):
         waiting = record.args[0] if record.args else 0
         record.name = config.COMPANION_NAME
-        record.msg, record.args = config.SERVER_BUSY_MESSAGE.format(threads=config.SERVER_THREADS, waiting=waiting,
-                                                                    s="" if waiting == 1 else "s"), ()
+        note = config.SERVER_BUSY_MESSAGE.format(threads=config.SERVER_THREADS, waiting=waiting, s="" if waiting == 1 else "s")
+        lines = inflight.snapshot()
+        record.msg, record.args = note + "".join(f"\n  {i}. {line}" for i, line in enumerate(lines, 1)), ()
         return True
 
 
 def run(app, on_start=()):
     logging.getLogger("waitress.queue").addFilter(BusyNote())
+    inflight.track(app)
     if not db.configured():
         raise SystemExit(
             "No database configured. Set these in .env:\n"

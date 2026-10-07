@@ -18,9 +18,10 @@ def on_ops(conn, d, pdf, op_list, llm=None):
     for o in (o for o in op_list if o.get("op") == "reread_cols"):
         table, ch, edited = column_reread.run(llm, pdf, table, o.get("cols") or [o.get("col")], edited, column_notes(d["hints"]))
         changes += ch
-    table, more, edited = table_ops.apply_ops(table, [o for o in op_list if o.get("op") != "reread_cols"], edited)
+    plain = [o for o in op_list if o.get("op") != "reread_cols"]
+    table, more, edited = table_ops.apply_ops(table, plain, edited)
     changes += more
-    d["table"] = table
+    d["table"], d["hints"] = table, settle_hints(d["hints"], plain, more, table)
     d["verification"] = verify.verify(table, pdftext.text_of(pdf), d["has_text_layer"], edited=edited)
     alias_hints(d, changes)
     documents.save(conn, d)
@@ -32,11 +33,30 @@ def column_notes(hints):
 
 
 def alias_hints(d, changes):
+    # a column made by an edit was never printed on the PDF, so renaming it says nothing about the PDF's own headers
+    made = {c["filled"] for c in changes if c.get("filled") and c["filled"] != c.get("source")}
     for c in changes:
         r = c.get("renamed")
-        if r and not re.search(r" \(\d+\)$", r["old"]):
+        if r and not re.search(r" \(\d+\)$", r["old"]) and r["old"] not in made:
             d["hints"] = [h for h in d["hints"] if not (h.get("scope") == "col" and h.get("alias") == r["old"])]
             d["hints"].append({"scope": "col", "col": r["new"], "alias": r["old"], "text": f'Call the column printed as "{r["old"]}" "{r["new"]}"'})
+
+
+def settle_hints(hints, ops, changes, table):
+    names = {c["name"].lower() for c in table["columns"]}
+    # a dropped column's name in use again (a cleaned copy renamed back) is no longer a column to leave out
+    hints = [h for h in hints if not (h.get("dropped") and str(h.get("col", "")).lower() in names)]
+    renamed = {c["renamed"]["old"]: c["renamed"]["new"] for c in changes if c.get("ok") and c.get("renamed")}
+    for o, c in zip(ops, changes):
+        if o.get("op") != "extract_col" or not c.get("ok") or not o.get("pattern"):
+            continue
+        name = c["filled"]
+        while name in renamed:
+            name = renamed[name]
+        has_rule = any(h.get("scope") == "col" and h.get("col") == name and not h.get("alias") and not h.get("dropped") for h in hints)
+        if name.lower() in names and not has_rule:
+            hints.append({"scope": "col", "col": name, "text": f'Extract only the part of "{c["source"]}" that matches the pattern {o["pattern"]}'})
+    return hints
 
 
 def on_undo(conn, d, pdf):

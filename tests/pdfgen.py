@@ -228,6 +228,60 @@ ECON_B = [econ_item("543000134", "9555684635082", "FC GRIP X7 B/PEN 0.7MM2BL/1BK
           econ_item("543710026", "9555684697691", "FC DF ERASER SIZE 48 BLK B10F2 187049", "1 UNIT", "1.00", "10", "3.6600")]
 
 
+SMO_COLUMNS = [("PO No.", "doc"), ("Store Code", "doc"), ("No", "row"), ("Item Code", "row"), ("Barcode", "row"), ("SKU Description", "row"),
+               ("Unit Price", "row"), ("UOM", "row"), ("Qty Ctn", "row"), ("Qty Pcs", "row"), ("Gross Amount", "row"), ("Nett Amount", "row")]
+CTN_X, PCS_X = 410, 428
+
+
+def smo_po(orders):
+    # each item over four lines: its number alone, then its FC- code, its barcode, and the description with the amounts;
+    # cartons and pieces print the quantity in the same way, only under a different column;
+    # a store name given as several lines is printed wrapped, and an order may name the address line under it
+    pages, rows = [], []
+    for d, (po, printed, items, *address) in enumerate(orders):
+        printed = [printed] if isinstance(printed, str) else list(printed)
+        store = " ".join(printed)
+        ops = [text(40, 800, "Purchase Order", 14), text(40, 780, f"PO No. {po}"), text(40, 760, "Deliver To"),
+               text(40, 748, f"{store[:3].upper()} - SYARIKAT MUDA OSMAN SDN BHD"), text(40, 736, "(BRN-198701005114)")]
+        ops += [text(40, 724 - 12 * k, line) for k, line in enumerate(printed)]
+        ops += [text(40, 724 - 12 * len(printed), (address or ["Unit No L3 - 01 & 02,"])[0]),
+               text(40, 690, "No Art/MCode SKU Description Cost Price UOM Qty FOC Gross Nett"),
+               text(CTN_X, 678, "Ctn"), text(PCS_X, 678, "Pcs"), text(470, 678, "Amount"), text(520, 678, "Amount")]
+        y = 660
+        for n, (code, bar, desc, price, uom, qty, unit) in enumerate(items, 1):
+            amount = f"{float(price) * int(qty):.2f}"
+            ops += [text(40, y, str(n)), text(60, y - 12, f"FC-{code}"), text(60, y - 24, bar), text(60, y - 36, f"{code} {desc}"),
+                    text(320, y - 36, price), text(370, y - 36, uom), text(CTN_X if unit == "ctn" else PCS_X, y - 36, qty),
+                    text(470, y - 36, amount), text(520, y - 36, amount)]
+            rows.append({"_doc": d, "PO No.": po, "Store Code": store, "No": str(n), "Item Code": code, "Barcode": bar,
+                         "SKU Description": f"{code} {desc}", "Unit Price": price, "UOM": uom,
+                         "Qty Ctn": qty if unit == "ctn" else "", "Qty Pcs": qty if unit == "pcs" else "",
+                         "Gross Amount": amount, "Nett Amount": amount})
+            y -= 50
+        pages.append(ops)
+    return build(pages), {"columns": [{"name": n, "kind": k} for n, k in SMO_COLUMNS], "rows": rows}
+
+
+SMO_TRAIN = [("HQ292380", "SMO Bookstores East Coast Mall (ECM)",
+              [("381811", "282479170000", "FC DESKTOP SHARPENER PLUS", "17.6000", "PCS", "1", "pcs"),
+               ("178318", "281485130000", "FABER-CASTELL 18CM STRAIGHT RULER", "29.2800", "B0020", "1", "ctn"),
+               ("584800", "281293170000", "3P FC SINGLE HOLE SHARPENER", "29.3000", "B0010", "2", "ctn"),
+               ("100028295", "282066040000", "FC DESKTOP SHARPENER ANGLE", "23.7600", "PCS", "3", "pcs")]),
+             ("HQ292381", "SMO Bookstores Mahkota Square",
+              [("178315", "281037820000", "FABER-CASTELL 15CM STRAIGHT RULER", "39.6500", "B0050", "1", "ctn"),
+               ("584603", "282348960000", "CLICK BOX SHARPENER", "28.9200", "PCS", "2", "pcs"),
+               ("401151", "282499550000", "FC STAPLER NO. 10 BLUE BOX OF 1", "21.6020", "B0006", "1", "ctn")]),
+             ("HQ292382", "SMO Bookstores Pekan",
+              [("584900", "281293180000", "3P FC SHARPENER OVAL CLASSIC", "29.3000", "B0010", "4", "ctn"),
+               ("381811", "282479170000", "FC DESKTOP SHARPENER PLUS", "17.6000", "PCS", "5", "pcs")])]
+SMO_WRAPPED = [("HQ292383", ("SMO Bookstores Tanah Merah Kompleks", "Humaira"),
+                [("311802", "281921940000", "2B 12X FC TRI-GRIP PENCIL", "34.0200", "B0006", "2", "ctn")])]
+SMO_NEW = [("HQ292390", "SMO Bookstores Raub",
+            [("178330", "281485140000", "FABER-CASTELL 30CM STRAIGHT RULER", "41.4800", "B0020", "3", "pcs"),
+             ("584803", "281900140000", "3P FC SINGLE HOLE SHARPENER PASTEL", "29.3000", "B0010", "6", "ctn"),
+             ("100028295", "282066040000", "FC DESKTOP SHARPENER ANGLE", "23.7600", "PCS", "7", "ctn")])]
+
+
 def purchase_orders(orders=6, pages_per_order=4, items_per_page=12):
     # a long, packed PDF like the ECONSAVE file: several orders, each running over several pages
     pages, truth, code = [], [], 8880000000000

@@ -36,7 +36,7 @@ def learn(conn, p, doc, table, doc_hints, tokens, structural, signature):
 
 
 def merge_columns(existing, confirmed, hints, bump=True):
-    col_hints = {h["col"]: h["text"] for h in hints if h.get("scope") == "col" and h.get("col") and not h.get("alias")}
+    col_hints = {h["col"]: h["text"] for h in hints if h.get("scope") == "col" and h.get("col") and not h.get("alias") and not h.get("dropped")}
     aliases = {}
     for h in hints:
         if h.get("scope") == "col" and h.get("col") and h.get("alias"):

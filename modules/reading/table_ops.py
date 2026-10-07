@@ -180,7 +180,7 @@ def extract_col(t, op, edited):
     if not hits:
         raise OpError(f'the pattern matched nothing in "{c["name"]}"')
     _check_examples(t, name, op)
-    return f'Filled "{name}" from "{c["name"]}" ({hits} of {len(t["rows"])} rows)'
+    return f'Filled "{name}" from "{c["name"]}" ({hits} of {len(t["rows"])} rows)', {"filled": name, "source": c["name"]}
 
 
 def set_col(t, op, edited):

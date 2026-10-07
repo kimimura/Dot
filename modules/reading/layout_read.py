@@ -3,7 +3,7 @@ from bisect import bisect_left, bisect_right
 from collections import Counter
 
 import config
-from modules.reading.layout_tokens import apply_rule, class_pattern, join_tokens, mask_line, mask_token, split_lines
+from modules.reading.layout_tokens import apply_rule, class_pattern, join_tokens, line_middles, mask_line, mask_token, split_lines
 
 
 def seqs_of(col):
@@ -100,6 +100,8 @@ def read_variant(variant, texts):
 
 def _read_doc(variant, texts, many=False):
     lines = split_lines(texts)
+    if any(r.get("wrap") for r in variant["fields"].values()) and not any(e for line in lines.edges for e in line):
+        return None, "layout needs word positions this file doesn't have"
     line_len = {i: len(toks) for i, (_, toks) in enumerate(lines)}
     doc = {}
     for c, rule in variant["fields"].items():
@@ -122,6 +124,7 @@ def _read_doc(variant, texts, many=False):
     tail = next(((k, c["tail"]) for k, c in enumerate(spec) if c.get("tail")), None)
     tail_re = re.compile("|".join(class_pattern(x) for x in tail[1])) if tail else None
 
+    middles = line_middles(texts)
     rows, failed, used = [], [], set()
     for k, start in enumerate(opens):
         stop = opens[k + 1] if k + 1 < len(opens) else len(lines)
@@ -130,7 +133,10 @@ def _read_doc(variant, texts, many=False):
             mt = row_re.match(" ".join(t for _, t in toks) + " ")
             if not mt:
                 continue
-            row = _values(spec, mt, toks, line_len)
+            row, starts = _values(spec, mt, toks, line_len)
+            off = _by_position(spec, row, starts, toks, [x for L in range(start, start + m) for x in middles[L]])
+            if off:
+                return None, off
             used.update(range(start, start + m))
             j, extra = start + m, []
             while tail and j < stop:
@@ -165,15 +171,61 @@ def _values(spec, mt, toks, line_len):
     for _, t in toks:
         offs.append(at)
         at += len(t) + 1
-    out = {}
+    out, starts = {}, {}
     for k, col in enumerate(spec):
         a, b = mt.span(f"c{k}")
         if a < 0 or a == b:
             out[col["col"]] = ""
             continue
-        part = toks[bisect_left(offs, a):bisect_right(offs, b - 1)]
-        out[col["col"]] = join_tokens(part, line_len, col.get("glue", False)) if col["var"] else " ".join(t for _, t in part)
-    return out
+        starts[col["col"]] = bisect_left(offs, a)
+        part = toks[starts[col["col"]]:bisect_right(offs, b - 1)]
+        v = join_tokens(part, line_len, col.get("glue", False)) if col["var"] else " ".join(t for _, t in part)
+        cut = col.get("cut") or {}
+        if cut.get("prefix") and v.startswith(cut["prefix"]):
+            v = v[len(cut["prefix"]):]
+        if cut.get("suffix") and v.endswith(cut["suffix"]):
+            v = v[:-len(cut["suffix"])]
+        out[col["col"]] = v
+    return out, starts
+
+
+def _place_of(name, between, starts, toks, middles):
+    # where a value sits between its two neighbouring columns on the same line: 0 at the one before, 1 at the one after
+    if name not in starts or any(n not in starts for n in between):
+        return None
+    (b, a), c = (starts[n] for n in between), starts[name]
+    if not toks[b][0] == toks[a][0] == toks[c][0] or None in (middles[b], middles[a], middles[c]) or middles[a] == middles[b]:
+        return None
+    return (middles[c] - middles[b]) / (middles[a] - middles[b])
+
+
+def _by_position(spec, row, starts, toks, middles):
+    # a value that could sit under either of two columns goes to the one it is printed beneath
+    groups = {}
+    for col in spec:
+        if col.get("alt"):
+            groups.setdefault(col["alt"], []).append(col)
+    for group in groups.values():
+        filled = [col for col in group if row[col["col"]]]
+        if len(filled) != 1:
+            continue
+        place = _place_of(filled[0]["col"], filled[0]["between"], starts, toks, middles)
+        if place is None:
+            return "layout needs word positions this file doesn't have"
+        home = min(group, key=lambda col: abs(col["spot"] - place))
+        if home is not filled[0]:
+            row[home["col"]], row[filled[0]["col"]] = row[filled[0]["col"]], ""
+            starts[home["col"]] = starts.pop(filled[0]["col"])
+    # a moved value shifts its neighbours' places too, so the one furthest from its own place is the one that moved
+    off = {}
+    for col in spec:
+        if "spot" in col and row.get(col["col"]):
+            place = _place_of(col["col"], col["between"], starts, toks, middles)
+            if place is not None and abs(place - col["spot"]) > config.LAYOUT_SPOT_TOLERANCE:
+                off[col["col"]] = abs(place - col["spot"])
+    if off:
+        return f'layout changed: "{max(off, key=off.get)}" printed under a different column'
+    return None
 
 
 def _row_problem(spec, failed, lines, total):

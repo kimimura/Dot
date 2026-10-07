@@ -1,5 +1,7 @@
 from modules.builder import chat, chat_prompt, edits
 from modules.documents import history
+from modules.profiles import learning
+from modules.reading import table_ops
 
 
 def doc(columns):
@@ -126,3 +128,49 @@ def test_row_numbers_from_dot_are_the_sheet_s_own():
     assert chat._from_sheet_rows({"op": "set_cell", "row": 200, "col": "Item", "value": "x"})["row"] == 199
     assert chat._from_sheet_rows({"op": "drop_row", "rows": [1, 278]})["rows"] == [0, 277]
     assert chat._from_sheet_rows({"op": "rename_col", "col": "A", "new_name": "B"}) == {"op": "rename_col", "col": "A", "new_name": "B"}
+
+
+def item_codes():
+    return {"columns": [{"name": "Item Code", "kind": "row"}, {"name": "Qty", "kind": "row"}],
+            "rows": [{"_doc": 0, "Item Code": "FC-100028295", "Qty": "6"}, {"_doc": 0, "Item Code": "FC-311802", "Qty": "2"}]}
+
+
+CLEAN_COPY = [{"op": "extract_col", "col": "Item Code", "into": "Item Code 2", "pattern": r"\d+"},
+              {"op": "drop_col", "col": "Item Code"},
+              {"op": "rename_col", "col": "Item Code 2", "new_name": "Item Code"}]
+
+
+def test_a_cleaned_copy_renamed_back_keeps_the_column_and_saves_the_rule():
+    hints = [{"scope": "col", "col": "Item Code", "text": 'Do not extract "Item Code"', "dropped": True}]
+    table, changes, _ = table_ops.apply_ops(item_codes(), CLEAN_COPY, set(), typed_by_model=True)
+    assert [r["Item Code"] for r in table["rows"]] == ["100028295", "311802"]
+    settled = edits.settle_hints(hints, CLEAN_COPY, changes, table)
+    assert not any(h.get("dropped") for h in settled)
+    assert edits.column_notes(settled)["Item Code"] == r'Extract only the part of "Item Code" that matches the pattern \d+'
+
+
+def test_a_column_that_already_has_a_rule_keeps_the_user_s_own_words():
+    own = {"scope": "col", "col": "Item Code", "text": "Extract the digits after FC-"}
+    table, changes, _ = table_ops.apply_ops(item_codes(), CLEAN_COPY, set(), typed_by_model=True)
+    assert edits.column_notes(edits.settle_hints([own], CLEAN_COPY, changes, table))["Item Code"] == own["text"]
+
+
+def test_a_column_really_dropped_stays_out_of_the_next_read():
+    ops = [{"op": "drop_col", "col": "Qty"}]
+    hints = [{"scope": "col", "col": "Qty", "text": 'Do not extract "Qty"', "dropped": True}]
+    table, changes, _ = table_ops.apply_ops(item_codes(), ops, set(), typed_by_model=True)
+    assert edits.settle_hints(hints, ops, changes, table) == hints
+
+
+def test_a_working_name_for_a_cleaned_copy_is_never_saved_as_a_printed_header():
+    d = {"hints": []}
+    _, changes, _ = table_ops.apply_ops(item_codes(), CLEAN_COPY, set(), typed_by_model=True)
+    edits.alias_hints(d, changes)
+    assert d["hints"] == []
+
+
+def test_the_saved_format_keeps_the_rule_not_the_drop_of_a_column_that_came_back():
+    hints = [{"scope": "col", "col": "Item Code", "text": "Extract only the digits after FC-"},
+             {"scope": "col", "col": "Item Code", "text": 'Do not extract "Item Code"', "dropped": True}]
+    cols = learning.merge_columns([], [{"name": "Item Code", "kind": "row"}], hints)
+    assert cols[0]["hint"] == "Extract only the digits after FC-"

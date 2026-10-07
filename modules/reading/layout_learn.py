@@ -1,12 +1,185 @@
+import re
+from bisect import bisect_right
 from collections import Counter
+from statistics import median
 
 import config
 from modules.reading.layout_places import (Unlearnable, doc_pages, field_rule, join_pieces, leftover_place,
                                            split_span, table_bands, value_spans)
 from modules.reading.layout_read import read_variant
-from modules.reading.layout_tokens import (apply_rule, join_tokens, similar, split_lines, tidy_classes,
+from modules.reading.layout_tokens import (apply_rule, join_tokens, line_middles, similar, split_lines, tidy_classes,
                                            token_class, word_set)
 from modules.reading.verify import norm_text
+
+
+def _inside_word(value, toks, taken):
+    # a value kept as only part of one printed word, e.g. 100028295 out of FC-100028295
+    v = (value or "").strip()
+    if len(v) < config.LAYOUT_MIN_CUT_VALUE or len(v.split()) != 1:
+        return None
+    for s, (_, t) in enumerate(toks):
+        if s not in taken and len(t) > len(v):
+            if t.endswith(v):
+                return s, ("prefix", t[:-len(v)])
+            if t.startswith(v):
+                return s, ("suffix", t[len(v):])
+    return None
+
+
+def _place(r, toks, rcols):
+    taken, where, tail, cut = set(), {}, {}, {}
+    for c in sorted((c for c in rcols if r.get(c)), key=lambda c: (-len(norm_text(r[c])), rcols.index(c))):
+        for s, e in value_spans(r[c], toks):
+            if not taken.intersection(range(s, e)):
+                where[c] = (s, e)
+                taken.update(range(s, e))
+                break
+    for c in [c for c in rcols if r.get(c) and c not in where]:
+        hit = _inside_word(r[c], toks, taken)
+        if hit:
+            where[c], cut[c] = (hit[0], hit[0] + 1), hit[1]
+            taken.add(hit[0])
+    missing = [c for c in rcols if r.get(c) and c not in where]
+    if len(missing) == 1 and where:
+        hit = leftover_place(r[missing[0]], toks, where)
+        if hit:
+            where[missing[0]], end = hit
+            if end:
+                tail[missing[0]] = end
+            missing = []
+    if missing and where:
+        row_end = max(e for _, e in where.values())
+        for c in missing:
+            hit = split_span(r[c], toks, taken, row_end)
+            if hit:
+                where[c], tail[c] = hit
+                taken.update(range(*hit[0]))
+                break
+    return where, tail, cut
+
+
+def _settle_bands(rows, lines, rcols, bands):
+    # an item may open with a short value printed alone above the rest (a line number): it starts right after the item before
+    last = []
+    for (a, b), r in zip(bands, rows):
+        toks = [(L, t) for L in range(a, b) for t in lines[L][1]]
+        where, tail, _ = _place(r, toks, rcols)
+        ends = [toks[e - 1][0] for _, e in list(where.values()) + list(tail.values())]
+        last.append(max(ends) if ends else None)
+    out = list(bands)
+    for i in range(1, len(out)):
+        if last[i - 1] is not None and out[i - 1][0] <= last[i - 1] < out[i][0] - 1:
+            out[i - 1], out[i] = (out[i - 1][0], last[i - 1] + 1), (last[i - 1] + 1, out[i][1])
+    own = {str(rows[0].get(c)).strip() for c in rcols if rows[0].get(c)}
+
+    def belongs(t):
+        return t in own or any(len(v) >= config.LAYOUT_MIN_CUT_VALUE and len(t) > len(v) and (t.endswith(v) or t.startswith(v)) for v in own)
+    a = out[0][0]
+    while a > 0 and out[0][0] - a < config.LAYOUT_LEAD_ABOVE and all(belongs(t) for t in lines[a - 1][1]):
+        a -= 1
+    out[0] = (a, out[0][1])
+    return out
+
+
+def _merged_order(votes):
+    # the commonest column order, with columns only some rows have (cartons in some, pieces in others) slotted in where they print
+    seqs = sorted(votes, key=lambda q: (-votes[q], -len(q)))
+    order = list(seqs[0])
+    for q in seqs[1:]:
+        for k, c in enumerate(q):
+            if c not in order:
+                before = next((q[j] for j in range(k - 1, -1, -1) if q[j] in order), None)
+                order.insert(order.index(before) + 1 if before else 0, c)
+    return order
+
+
+def _counts_up(c, rows):
+    # a line number, 1, 2, 3 ... in every document: any number of digits may follow
+    by_doc = {}
+    for r in rows:
+        by_doc.setdefault(r.get("_doc", 0), []).append(str(r.get(c, "")))
+    return len(rows) > 1 and all(v == [str(i) for i in range(1, len(v) + 1)] for v in by_doc.values())
+
+
+def _alternatives(spec, rows):
+    # optional columns side by side that never both hold a value in one row: only where they sit tells them apart
+    groups, run = [], []
+    for col in spec + [None]:
+        if col and col["optional"] and not col["var"]:
+            run.append(col)
+            continue
+        if len(run) > 1 and all(sum(bool(r.get(c["col"])) for c in run) <= 1 for r in rows):
+            groups.append(run)
+        run = []
+    return groups
+
+
+def _homes(group, spots):
+    # each column prints in a spot of its own across the page; values sitting in another column's spot are mistakes in the sheet
+    every = sorted(x for xs in spots.values() for x in xs)
+    widest = sorted(range(1, len(every)), key=lambda i: every[i] - every[i - 1], reverse=True)[:len(group) - 1]
+    cuts = sorted(every[i] for i in widest if every[i] - every[i - 1] >= config.LAYOUT_SPOT_GAP)
+    homes, owner = {}, {}
+    for col in group:
+        name = col["col"]
+        votes = Counter(bisect_right(cuts, x) for x in spots[name])
+        home, n = votes.most_common(1)[0]
+        if home in owner:
+            raise Unlearnable(f'{n} of {len(spots[name])} "{name}" values are printed under "{owner[home]}" on the PDF: check those rows')
+        stray = len(spots[name]) - n
+        if stray > (1 - config.LAYOUT_TRUST) * len(spots[name]):
+            raise Unlearnable(f'{stray} of {len(spots[name])} "{name}" values are printed under another column on the PDF: check those rows')
+        owner[home] = name
+        homes[name] = round(median(x for x in spots[name] if bisect_right(cuts, x) == home), 4)
+    return homes
+
+
+def _anchors(spec, k):
+    # the nearest columns either side that every row has: a column's place is measured between them
+    steady = [j for j, col in enumerate(spec) if not col["var"] and not col["optional"]]
+    before = next((spec[j]["col"] for j in reversed(steady) if j < k), None)
+    after = next((spec[j]["col"] for j in steady if j > k), None)
+    return before, after
+
+
+def _between(spot_rows, name, before, after):
+    # where each value sits between its neighbours on the same line, 0 at the one before and 1 at the one after
+    out = []
+    for row in spot_rows:
+        if name in row and before in row and after in row:
+            (lc, xc), (lb, xb), (la, xa) = row[name], row[before], row[after]
+            if lc == lb == la and None not in (xc, xb, xa) and xa != xb:
+                out.append((xc - xb) / (xa - xb))
+    return out
+
+
+def _learn_spots(spec, spot_rows, rows):
+    groups = _alternatives(spec, rows)
+    for group in groups:
+        before, after = _anchors(spec, spec.index(group[0]))
+        spots = {col["col"]: _between(spot_rows, col["col"], before, after) if before and after else [] for col in group}
+        if not all(spots.values()):
+            raise Unlearnable(f'"{group[0]["col"]}" and "{group[1]["col"]}" can only be told apart by where they sit on the page')
+        homes = _homes(group, spots)
+        for col in group:
+            col["spot"], col["between"], col["alt"] = homes[col["col"]], [before, after], group[0]["col"]
+    # a column keeping one place between its neighbours keeps it, so a value printed under another column is never taken for it
+    for k, col in enumerate(spec):
+        before, after = _anchors(spec, k)
+        if "spot" in col or col["var"] or not before or not after or col["col"] in (before, after):
+            continue
+        spots = sorted(_between(spot_rows, col["col"], before, after))
+        if len(spots) < 2:
+            continue
+        if spots[-1] - spots[0] <= config.LAYOUT_SPOT_SPREAD:
+            col["spot"], col["between"] = round(median(spots), 4), [before, after]
+            continue
+        cut = max(range(1, len(spots)), key=lambda i: spots[i] - spots[i - 1])
+        left, right = spots[:cut], spots[cut:]
+        numbers = all(re.fullmatch(r"[\d.,]+", str(r.get(col["col"]))) for r in rows if r.get(col["col"]))
+        if (numbers and len(left) > 1 and len(right) > 1 and spots[cut] - spots[cut - 1] >= config.LAYOUT_SPOT_GAP
+                and left[-1] - left[0] <= config.LAYOUT_SPOT_SPREAD and right[-1] - right[0] <= config.LAYOUT_SPOT_SPREAD):
+            raise Unlearnable(f'"{col["col"]}" values are printed under two different columns on the PDF: check the sheet')
 
 
 def learn(table, texts):
@@ -15,41 +188,21 @@ def learn(table, texts):
     table = join_pieces(table)
     segs = doc_pages(table, texts)
 
-    placed, found, seg_lines = [], Counter(), []
+    placed, found, seg_lines, cut_of, spot_rows = [], Counter(), [], {}, []
     for rows, pages in segs:
-        lines = split_lines([texts[p] for p in pages])
+        page_texts = [texts[p] for p in pages]
+        lines, middles = split_lines(page_texts), line_middles(page_texts)
         line_len = {i: len(toks) for i, (_, toks) in enumerate(lines)}
-        bands = table_bands({"columns": table["columns"], "rows": rows}, lines)
+        bands = _settle_bands(rows, lines, rcols, table_bands({"columns": table["columns"], "rows": rows}, lines))
         seg_lines.append((rows, lines, bands))
         for i, r in enumerate(rows):
             a, b = bands[i]
             toks = [(L, t) for L in range(a, b) for t in lines[L][1]]
-            taken, where, tail = set(), {}, {}
-            for c in sorted((c for c in rcols if r.get(c)), key=lambda c: (-len(norm_text(r[c])), rcols.index(c))):
-                for s, e in value_spans(r[c], toks):
-                    if not taken.intersection(range(s, e)):
-                        where[c] = (s, e)
-                        taken.update(range(s, e))
-                        found[c] += 1
-                        break
-            missing = [c for c in rcols if r.get(c) and c not in where]
-            if len(missing) == 1 and where:
-                hit = leftover_place(r[missing[0]], toks, where)
-                if hit:
-                    where[missing[0]], end = hit
-                    if end:
-                        tail[missing[0]] = end
-                    found[missing[0]] += 1
-                    missing = []
-            if missing and where:
-                row_end = max(e for _, e in where.values())
-                for c in missing:
-                    hit = split_span(r[c], toks, taken, row_end)
-                    if hit:
-                        where[c], tail[c] = hit
-                        taken.update(range(*hit[0]))
-                        found[c] += 1
-                        break
+            mids = [x for L in range(a, b) for x in middles[L]]
+            where, tail, cut = _place(r, toks, rcols)
+            found.update(where.keys())
+            cut_of[id(r)] = cut
+            spot_rows.append({c: (toks[s][0], mids[s]) for c, (s, _) in where.items()})
             placed.append((r, toks, where, tail, line_len))
 
     all_rows = [r for r, *_ in placed]
@@ -71,7 +224,7 @@ def learn(table, texts):
     votes = Counter(seq_of(where) for _, _, where, _, _ in complete)
     if not votes:
         raise Unlearnable("rows don't share one column order")
-    order = list(max(votes, key=lambda q: (votes[q], len(q))))
+    order = _merged_order(votes)
     sizes = {c: Counter(where[c][1] - where[c][0] for _, _, where, _, _ in complete if c in where) for c in in_row}
     fixed = {c for c, cnt in sizes.items() if cnt and max(cnt.values()) >= 0.8 * sum(cnt.values()) and max(cnt) <= 4}
     rare = {c: {n for n, k in sizes[c].items() if k < (1 - config.LAYOUT_TRUST) * sum(sizes[c].values())} for c in fixed}
@@ -117,7 +270,16 @@ def learn(table, texts):
                     for j, (_, t) in enumerate(part):
                         pos[j].add(token_class(t))
             col["seqs"] = {n: [tidy_classes(p, widen=k > 0) for p in pos] for n, pos in seqs.items()}
+            if list(col["seqs"]) == ["1"] and _counts_up(c, all_rows):
+                col["seqs"] = {"1": [[f"INT:1-{config.LAYOUT_LINE_NUMBER_DIGITS}"]]}
+            cuts = Counter(cut_of[id(r)].get(c) for r, _, where, _, _ in placed if c in where)
+            (kind_text, n), total = cuts.most_common(1)[0], sum(cuts.values())
+            if kind_text and n < config.LAYOUT_TRUST * total:
+                raise Unlearnable(f'"{c}" is cut out of the printed words in different ways')
+            if kind_text:
+                col["cut"] = {kind_text[0]: kind_text[1]}
         spec.append(col)
+    _learn_spots(spec, spot_rows, all_rows)
     lead = []
     for col in spec:
         if col["var"] or col["optional"] or len(col["seqs"]) > 1:

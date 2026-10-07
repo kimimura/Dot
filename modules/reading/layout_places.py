@@ -1,6 +1,7 @@
 import math
 from bisect import bisect_left
 from difflib import SequenceMatcher
+from statistics import median
 
 import config
 from modules.reading.layout_tokens import apply_rule, mask_line, mask_token, similar, word_set
@@ -131,6 +132,36 @@ def doc_pages(table, texts):
     raise Unlearnable("couldn't tell the documents in the file apart")
 
 
+def _with_wrap(rule, pairs):
+    # a value that runs on to the next line somewhere: learn the box it is printed in and how the next part opens,
+    # so a line is only joined when the word could not have fitted and does not open what follows
+    if rule.get("after") != "$" or not all(getattr(ln, "edges", None) for ln, _ in pairs):
+        return rule
+    got = [((apply_rule(rule, ln, where=True) or [None])[0], ln, v) for ln, v in pairs]
+    got = [(x[0], x[1], ln, v) for x, ln, v in got if x and ln.edges[x[0]] and None not in ln.edges[x[0]]]
+    if not any(v != g and v.startswith(g + " ") for _, g, _, v in got):
+        return rule
+    left = median(ln.edges[L][0][0] for L, _, ln, _ in got)
+
+    def boxed_lines(ln, L):
+        return [j for j in range(L, min(L + config.LAYOUT_MAX_BLOCK_LINES, len(ln)))
+                if ln[j][0] == ln[L][0] and ln.edges[j] and None not in ln.edges[j] and abs(ln.edges[j][0][0] - left) <= config.LAYOUT_WRAP_MARGIN]
+    # the value's own lines and the line after it are in the box; what that line opens with marks where a value ends
+    rights, stops = [], set()
+    for L, _, ln, v in got:
+        have = []
+        for j in boxed_lines(ln, L):
+            rights.append(ln.edges[j][-1][1])
+            if len(have) >= len(v.split()):
+                stops.add(mask_token(ln[j][1][0]))
+                break
+            have += ln[j][1]
+    boxed = dict(rule, wrap={"left": round(left, 4), "right": round(max(rights), 4), "stops": sorted(stops)})
+    before = [(apply_rule(rule, ln) or [None])[0] == v for ln, v in pairs]
+    after = [(apply_rule(boxed, ln) or [None])[0] == v for ln, v in pairs]
+    return boxed if sum(after) > sum(before) and all(a for a, b in zip(after, before) if b) else rule
+
+
 def field_rule(name_words, pairs):
     # a few documents in a confirmed sheet may carry the model's mistakes: a rule must agree with nearly all of them
     need = max(1, math.ceil(config.LAYOUT_FIELD_TRUST * len(pairs)))
@@ -163,9 +194,29 @@ def field_rule(name_words, pairs):
                     got = apply_rule(rule, lines, where=True)
                     if not got or got[0] != (L, value):
                         continue
+                    rule = _with_wrap(rule, pairs)
                     if sum((apply_rule(rule, ln) or [None])[0] == v for ln, v in pairs) >= need:
                         return dict(rule, stable=len({v for _, v in got}) == 1)
-    return _block_rule(pairs, need)
+    return _under_rule(pairs, need) or _block_rule(pairs, need)
+
+
+def _under_rule(pairs, need):
+    # a value opening its own line a few lines under a fixed label, e.g. a store name under "Deliver To"
+    lines, value = pairs[0]
+    vt = value.split()
+    for L, (_, toks) in enumerate(lines):
+        if toks[:len(vt)] != vt:
+            continue
+        after = "$" if len(vt) == len(toks) else mask_token(toks[len(vt)])
+        for up in range(1, config.LAYOUT_MAX_BLOCK_LINES + 1):
+            if L - up < 0 or not any(mask_token(t) != "#" for t in lines[L - up][1]):
+                continue
+            rule = {"under": mask_line(lines[L - up][1]), "skip": up, "after": after, "n": len(vt)}
+            got = apply_rule(rule, lines, where=True)
+            rule = _with_wrap(rule, pairs)
+            if got and got[0] == (L, value) and sum((apply_rule(rule, ln) or [None])[0] == v for ln, v in pairs) >= need:
+                return dict(rule, stable=len({v for _, v in got}) == 1)
+    return None
 
 
 def _block_rule(pairs, need):

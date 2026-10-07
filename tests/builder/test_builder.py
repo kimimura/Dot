@@ -1,11 +1,11 @@
 from core import ai
 from core.ai import errors
 from core.ai.errors import Truncated
-from helpers import ACME_COLUMNS, columns, upload
+from helpers import ACME_COLUMNS, columns, convert
 
 
 def builder_doc(client, acme_pdf):
-    did = upload(client, acme_pdf).headers["X-Dot-Document"]
+    did = convert(acme_pdf)["id"]
     env = client.post(f"/api/docs/{did}/review").get_json()
     assert env["doc"]["stage"] == "review" and columns(env) == ACME_COLUMNS
     return did
@@ -71,6 +71,21 @@ def test_values_dot_types_are_checked_and_values_you_type_are_trusted(client, ac
     monkeypatch.setattr(ai, "get_llm", lambda: Stub())
     cells = client.post(f"/api/docs/{did}/chat", json={"message": "qty should be 73519 and 84620"}).get_json()["table"]["verification"]["cells"]
     assert (cells["0|Qty"], cells["1|Qty"], cells["0|Price"]) == ("miss", "miss", "edited")
+
+
+def test_a_change_that_misses_your_example_is_not_made_and_dot_says_why(client, acme_pdf, monkeypatch):
+    class Stub:
+        def complete(self, pdf, prompt, kind="extract"):
+            if kind != "chat":
+                return ai.OfflineAdapter().complete(pdf, prompt, kind)
+            return {"reply": "I've added the Store column for you.", "intent": "edit", "hints": [], "ops": [
+                {"op": "extract_col", "col": "Customer", "into": "Store", "pattern": r"^(\w+)", "at": "B", "examples": ["Beta Retail"]}]}
+    did = builder_doc(client, acme_pdf)
+    monkeypatch.setattr(ai, "get_llm", lambda: Stub())
+    env = client.post(f"/api/docs/{did}/chat", json={"message": "add Store at B, Store is Beta Retail"}).get_json()
+    assert columns(env) == ACME_COLUMNS and not env["changes"][0]["ok"]
+    say = env["bot"]["say"]
+    assert 'That gave "Beta", not your example "Beta Retail". Nothing changed.' in say and "I've added" not in say
 
 
 def test_a_cut_off_reply_changes_nothing_and_says_so(client, acme_pdf, monkeypatch):
@@ -155,12 +170,12 @@ def test_a_new_format_is_saved_and_recognised_next_time(client, acme_pdf, acme2_
     assert env["doc"]["stage"] == "confirmed" and env["doc"]["profile_name"] == "ACME"
     p = profile_named(client, "ACME")
     assert [c["name"] for c in p["columns"]] == ACME_COLUMNS and p["n_docs"] == 1
-    assert upload(client, acme2_pdf).headers["X-Dot-Format"] == "ACME"
+    assert convert(acme2_pdf)["profile_id"] == p["id"]
 
 
 def test_a_name_already_taken_is_asked_again(client, acme_pdf, orbit_pdf):
     save_as(client, builder_doc(client, acme_pdf), "ACME")
-    did = upload(client, orbit_pdf, "orbit.pdf").headers["X-Dot-Document"]
+    did = convert(orbit_pdf, "orbit.pdf")["id"]
     client.post(f"/api/docs/{did}/review")
     env = save_as(client, did, "acme")
     assert env["doc"]["stage"] == "naming" and "**ACME**" in env["bot"]["say"]

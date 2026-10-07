@@ -5,12 +5,11 @@ import pytest
 import config
 from conftest import wait_for
 from core import webhook
-from helpers import upload
+from helpers import convert
 from modules.outputs import build
 
-COLUMNS = [{"name": "PO No.", "kind": "doc", "field": "order_number"}, {"name": "Date", "kind": "doc", "field": "order_date"},
-           {"name": "Printed on", "kind": "doc"}, {"name": "Grand Total", "kind": "doc", "field": "grand_total"},
-           {"name": "Item", "kind": "row", "field": "item_code"}, {"name": "Unit Price (RM)", "kind": "row", "field": "unit_price"},
+COLUMNS = [{"name": "PO No.", "kind": "doc"}, {"name": "Date", "kind": "doc"}, {"name": "Printed on", "kind": "doc"},
+           {"name": "Grand Total", "kind": "doc"}, {"name": "Item", "kind": "row"}, {"name": "Unit Price (RM)", "kind": "row"},
            {"name": "Free Unit", "kind": "row"}]
 
 
@@ -22,13 +21,13 @@ def row(doc, po, item, price, free=""):
 def test_a_file_with_several_orders_becomes_one_entry_per_order_with_its_own_rows():
     table = {"columns": COLUMNS, "rows": [row(0, "10018-1", "519140009", "9.9100", "0.00"), row(0, "10018-1", "519110014", "9.5100"),
                                           row(1, "10022-2", "543000087", "3.0600", "0.00")]}
-    out = build.build(table, "ECONSAVE", "dmy", "2026-10-06 10:15:42")
-    assert out == {"chain": "ECONSAVE", "process_date": "2026-10-06 10:15:42", "orders": [
-        {"order_number": "10018-1", "order_date": "2026-09-30", "printed_on": "2026-10-01 09:05:57", "grand_total": "8,395.49",
-         "rows": [{"item_code": "519140009", "unit_price": "9.9100", "free_unit": "0.00"},
-                  {"item_code": "519110014", "unit_price": "9.5100", "free_unit": ""}]},
-        {"order_number": "10022-2", "order_date": "2026-09-30", "printed_on": "2026-10-01 09:05:57", "grand_total": "8,395.49",
-         "rows": [{"item_code": "543000087", "unit_price": "3.0600", "free_unit": "0.00"}]}]}
+    out = build.build(table, "ECONSAVE", "2026-10-06 10:15:42", "po@econsave.example")
+    assert out == {"chain": "ECONSAVE", "received_from": "po@econsave.example", "process_date": "2026-10-06 10:15:42", "orders": [
+        {"po_no": "10018-1", "date": "2026-09-30", "printed_on": "2026-10-01 09:05:57", "grand_total": "8,395.49",
+         "rows": [{"item": "519140009", "unit_price_rm": "9.9100", "free_unit": "0.00"},
+                  {"item": "519110014", "unit_price_rm": "9.5100", "free_unit": ""}]},
+        {"po_no": "10022-2", "date": "2026-09-30", "printed_on": "2026-10-01 09:05:57", "grand_total": "8,395.49",
+         "rows": [{"item": "543000087", "unit_price_rm": "3.0600", "free_unit": "0.00"}]}]}
 
 
 @pytest.mark.parametrize("printed, order, want", [("01/02/2026", "dmy", "2026-02-01"), ("01/02/2026", "mdy", "2026-01-02"),
@@ -39,19 +38,20 @@ def test_only_whole_dates_change_and_only_into_one_style(printed, order, want):
     assert build.standard_date(printed, order) == want
 
 
-def test_a_converted_file_of_a_known_format_keeps_its_output_and_an_unknown_one_none(client, fake_db, acme_pdf, acme2_pdf, orbit_pdf):
+def test_every_converted_file_keeps_its_output_and_an_unknown_one_says_so(client, fake_db, acme_pdf, acme2_pdf, orbit_pdf):
     fake_db.add_profile("ACME", [("Invoice No", "doc"), ("Item", "row"), ("Qty", "row")], acme_pdf)
-    known = upload(client, acme2_pdf).headers["X-Dot-Document"]
-    unknown = upload(client, orbit_pdf, "orbit.pdf").headers["X-Dot-Document"]
+    known = convert(acme2_pdf)["id"]
+    unknown = convert(orbit_pdf, "orbit.pdf")["id"]
     out = fake_db.outputs[(known, "current")]
     assert out["chain"] == "ACME" and out["orders"][0]["invoice_no"] == "INV-2026-0107"
     assert out["orders"][0]["rows"] == [{"item": "A300", "qty": "3"}]
-    assert (unknown, "current") not in fake_db.outputs
+    assert fake_db.outputs[(unknown, "current")]["chain"] == "Unidentified"
+    assert fake_db.outputs[(unknown, "current")]["orders"][0]["po_number"] == "PO-77812"
 
 
 def test_an_edit_updates_the_current_output(client, fake_db, acme_pdf, acme2_pdf):
     fake_db.add_profile("ACME", [("Invoice No", "doc"), ("Item", "row"), ("Qty", "row")], acme_pdf)
-    did = upload(client, acme2_pdf).headers["X-Dot-Document"]
+    did = convert(acme2_pdf)["id"]
     client.post(f"/api/docs/{did}/ops", json={"ops": [{"op": "set_cell", "row": 0, "col": "Qty", "value": "7"}]})
     assert fake_db.outputs[(did, "current")]["orders"][0]["rows"][0]["qty"] == "7"
 

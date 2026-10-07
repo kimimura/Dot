@@ -14,9 +14,11 @@
   --ok: #1f7a4d;
   --held: #8a6212; --held-bg: rgb(138 98 18 / 12%);
   --fail: #b23b3b; --fail-bg: rgb(178 59 59 / 10%);
+  color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --canvas: #0a0a0a; --surface: #0a0a0a; --ink: #ffffff;
     --ink-2: rgb(255 255 255 / 56%); --ink-3: rgb(255 255 255 / 50%); --ink-4: rgb(255 255 255 / 38%);
     --border: rgb(255 255 255 / 12%); --border-strong: rgb(255 255 255 / 22%);
@@ -27,6 +29,7 @@
   }
 }
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --canvas: #0a0a0a; --surface: #0a0a0a; --ink: #ffffff;
   --ink-2: rgb(255 255 255 / 56%); --ink-3: rgb(255 255 255 / 50%); --ink-4: rgb(255 255 255 / 38%);
   --border: rgb(255 255 255 / 12%); --border-strong: rgb(255 255 255 / 22%);

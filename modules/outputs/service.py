@@ -3,18 +3,32 @@ import time
 import config
 from modules.outputs import build, repository
 from modules.profiles import repository as profiles
+from modules.submissions import repository as submissions
 
 PROCESSED = ("converted", "confirmed")
 
 
+def ready(d):
+    return d.get("stage") in PROCESSED and bool(d.get("table"))
+
+
 def of(conn, d):
-    # only a processed file of a known format has an official output; an unidentified one waits until its format is taught
-    if d.get("stage") not in PROCESSED or not d.get("table") or not d.get("profile_id"):
+    if not ready(d):
         return None
-    p = profiles.get(conn, d["profile_id"])
-    if not p:
-        return None
-    return build.build(d["table"], p["name"], p.get("date_order"), time.strftime(config.OUTPUT_TIME_FORMAT))
+    # a file whose format isn't known yet still has an output, marked as unidentified
+    p = profiles.get(conn, d["profile_id"]) if d.get("profile_id") else None
+    chain = p["name"] if p else config.OUTPUT_UNIDENTIFIED
+    return build.build(d["table"], chain, time.strftime(config.OUTPUT_TIME_FORMAT), sender_of(conn, d))
+
+
+def sender_of(conn, d):
+    s = submissions.get(conn, d["submission_id"]) if d.get("submission_id") else None
+    return (s or {}).get("sender") or ""
+
+
+def current(conn, d):
+    # files read before outputs were kept have none stored, so theirs is worked out on the spot
+    return repository.get(conn, d["id"], "current") or of(conn, d)
 
 
 def refresh(conn, d):

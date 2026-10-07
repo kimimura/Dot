@@ -5,7 +5,7 @@ import json
 import time
 
 import config
-from core import db, jobs
+from core import activity, db, jobs
 from core.errors import Refused
 from modules.conversion import intake, queue as conversion
 from modules.email_intake import delivery
@@ -64,6 +64,8 @@ def receive(body):
         conn.close()
     turned_away = {r["filename"] for r in rejected}
     skipped += [{"file": r["filename"], "reason": r["error"]} for r in rejected]
+    activity.note(f"Email from {body.get('email') or 'an unknown sender'}: " + (activity.count(len(ids), "PDF") if ids else "no readable PDF")
+                  + (f", {len(skipped)} skipped" if skipped else ""))
     if not ids:
         return {"status": "rejected", "count": 0, "files": [], "skipped": skipped}, 415
     for did in ids:

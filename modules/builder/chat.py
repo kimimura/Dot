@@ -84,7 +84,11 @@ def _apply_revision(conn, llm, d, pdf, reply, op_list, new_hints, message="", fo
     history.snapshot(d)
     d["table"], d["verification"], d["hints"], d["extra_fields"] = table, verification, hints, extra
     alias_hints(d, changes)
-    ask_review(d, reply=reply, applied=any(c["ok"] for c in changes))
+    applied = any(c["ok"] for c in changes)
+    if changes and not applied:
+        # nothing was made, so the reply says why rather than describing a change that didn't happen
+        reply = changes[0]["text"]
+    ask_review(d, reply=reply, applied=applied)
     return changes
 
 
@@ -176,6 +180,14 @@ def _from_sheet_letters(o, columns):
     o = {**o}
     if "col" in o:
         o["col"] = name(o["col"])
+    # a place one past the last letter means "at the end"
+    for key in ("at", "to"):
+        if isinstance(o.get(key), str) and o[key].strip().upper() == chat_prompt.letter(len(columns)) and columns:
+            o.pop(key)
+            o["after"] = columns[-1]
+    for key in ("at", "to", "after"):
+        if key in o:
+            o[key] = name(o[key])
     for key in ("cols", "order"):
         if isinstance(o.get(key), list):
             o[key] = [name(x) for x in o[key]]

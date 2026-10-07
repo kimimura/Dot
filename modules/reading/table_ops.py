@@ -102,6 +102,33 @@ def _fill(t, name, op):
     raise OpError(f'"{name}" needs {len(t["rows"])} values (one per row){per}, got {len(vals)}')
 
 
+def _plain(v):
+    return " ".join(str(v or "").split()).lower()
+
+
+def _check_examples(t, name, op):
+    # values the user gave as examples must come out exactly, or the change is not made
+    got = {_plain(r.get(name)) for r in t["rows"]}
+    for ex in [e for e in (op.get("examples") or []) if _plain(e)]:
+        if _plain(ex) not in got:
+            seen = list(dict.fromkeys(str(r.get(name) or "").strip() for r in t["rows"] if str(r.get(name) or "").strip()))[:3]
+            shown = ", ".join(f'"{s}"' for s in seen) if seen else "empty values"
+            raise OpError(f'That gave {shown}, not your example "{str(ex).strip()}". Nothing changed. Try rewording it, or give another example.')
+
+
+def _place(t, c, at=None, after=None, new=False):
+    # "at" ends up where that column stood in the sheet the user saw; "after" sits right behind one. Nothing else moves.
+    if at is None and after is None:
+        return
+    target = _col(t, at if at is not None else after)
+    if target is c:
+        return
+    seen = [x for x in t["columns"] if not (new and x is c)]
+    i = seen.index(target)
+    t["columns"].remove(c)
+    t["columns"].insert(i if at is not None else t["columns"].index(target) + 1, c)
+
+
 def add_col(t, op, edited):
     name = _unique(t, str(op.get("name", "")).strip()[:60] or "New Column")
     probe = {"rows": [dict(r) for r in t["rows"]]}
@@ -112,8 +139,19 @@ def add_col(t, op, edited):
         r[name] = p[name]
     if kind == "doc":
         t["columns"].sort(key=lambda x: 0 if x["kind"] == "doc" else 1)
+    _place(t, _col(t, name), op.get("at"), op.get("after"), new=True)
+    _check_examples(t, name, op)
     _wrote(edited, t, name, None, op)
     return f'Added column "{name}"'
+
+
+def move_col(t, op, edited):
+    c = _col(t, op.get("col"))
+    at, after = op.get("to", op.get("at")), op.get("after")
+    if at is None and after is None:
+        raise OpError(f'Where should "{c["name"]}" go?')
+    _place(t, c, at, after)
+    return f'Moved "{c["name"]}"'
 
 
 def extract_col(t, op, edited):
@@ -124,25 +162,31 @@ def extract_col(t, op, edited):
         raise OpError(f"the pattern doesn't work: {e}")
     into = str(op.get("into") or "").strip()[:60] or c["name"] + " (part)"
     same = next((x for x in t["columns"] if x["name"].lower() == into.lower() and x is not c), None)
-    if same and not any(r.get(same["name"]) for r in t["rows"]):
+    if into.lower() == c["name"].lower():
+        # taking part of a column into itself trims it where it stands, never a copy beside it
+        name, same = c["name"], c
+    elif same and not any(r.get(same["name"]) for r in t["rows"]):
         name = same["name"]
     else:
         name = _unique(t, into)
         t["columns"].append({"name": name, "kind": c["kind"]})
+    _place(t, _col(t, name), op.get("at"), op.get("after"), new=not same or name != same["name"])
     hits = 0
     for r in t["rows"]:
         m = rx.search(r.get(c["name"], "") or "")
         v = (m.group(1) if m.groups() else m.group(0)).strip() if m else ""
-        r[name] = v or ""
+        r[name] = v or ("" if name != c["name"] else r.get(name, ""))
         hits += bool(v)
     if not hits:
         raise OpError(f'the pattern matched nothing in "{c["name"]}"')
+    _check_examples(t, name, op)
     return f'Filled "{name}" from "{c["name"]}" ({hits} of {len(t["rows"])} rows)'
 
 
 def set_col(t, op, edited):
     c = _col(t, op.get("col"))
     _fill(t, c["name"], op)
+    _check_examples(t, c["name"], op)
     _wrote(edited, t, c["name"], None, op)
     return f'Updated every value in "{c["name"]}"'
 
@@ -337,7 +381,7 @@ def add_row(t, op, edited):
 
 OPS = {
     "rename_col": rename_col, "drop_col": drop_col, "add_col": add_col, "set_col": set_col,
-    "set_cell": set_cell, "set_col_kind": set_col_kind, "reorder_cols": reorder_cols,
+    "set_cell": set_cell, "set_col_kind": set_col_kind, "reorder_cols": reorder_cols, "move_col": move_col,
     "split_col": split_col, "merge_cols": merge_cols, "transform_col": transform_col, "extract_col": extract_col,
     "fill_down": fill_down, "drop_row": drop_row, "add_row": add_row,
 }

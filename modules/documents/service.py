@@ -1,12 +1,15 @@
+import json
+from io import BytesIO
 from pathlib import Path
 
 from flask import abort
 
 from core import db, sheets
 from modules.documents import repository as documents, view, work
+from modules.outputs import service as outputs
 from modules.profiles import learning
 
-XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+MIMETYPES = {"csv": "text/csv", "json": "application/json", "pdf": "application/pdf"}
 
 
 def list_docs(q, unfinished):
@@ -35,14 +38,23 @@ def delete(doc_id):
 
 
 def export(doc_id, ext):
-    conn = db.connect()
-    d = work.load_or_404(conn, doc_id)
-    conn.close()
-    if ext not in ("xlsx", "csv") or not d.get("table"):
+    if ext not in ("csv", "json", "pdf"):
         abort(404)
-    base = Path(d["filename"]).stem
-    buf = sheets.xlsx_bytes(d["table"], base) if ext == "xlsx" else sheets.csv_bytes(d["table"])
-    return buf, f"{base}.{ext}", XLSX if ext == "xlsx" else "text/csv"
+    conn = db.connect()
+    try:
+        d = work.load_or_404(conn, doc_id)
+        if ext == "pdf":
+            body = documents.load_pdf(conn, doc_id)
+        elif ext == "json":
+            data = outputs.current(conn, d)
+            body = data and json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+        else:
+            body = d.get("table") and sheets.csv_bytes(sheets.with_sender(d["table"], outputs.sender_of(conn, d))).getvalue()
+    finally:
+        conn.close()
+    if not body:
+        abort(404)
+    return BytesIO(body), f"{Path(d['filename']).stem}.{ext}", MIMETYPES[ext]
 
 
 def pdf_bytes(doc_id):

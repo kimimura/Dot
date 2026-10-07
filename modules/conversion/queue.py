@@ -1,6 +1,6 @@
 import logging
 
-from core import ai, db, jobs, locks
+from core import activity, ai, db, jobs, locks
 from core.ai.errors import LLMError
 from modules.conversion import convert, reread
 from modules.documents import repository as documents
@@ -32,6 +32,7 @@ def run(did):
                 d["stage"] = "converting"
                 documents.save(conn, d)
                 conn.commit()
+                activity.note(f"Reading {d['filename']}")
                 try:
                     convert.convert(conn, llm, d, documents.load_pdf(conn, did))
                 except LLMError as e:
@@ -39,6 +40,10 @@ def run(did):
                 except Exception:
                     log.exception("converting %s failed", did)
                     d["stage"], d["error"] = "failed", "stopped unexpectedly"
+                if d["stage"] == "failed":
+                    activity.note(f"Failed: {d['filename']}: {d['error']}")
+                # a layout the format learned while reading this file is kept, whatever became of the file
+                conn.commit()
         finally:
             conn.close()
         conn = db.connect(tries=4)

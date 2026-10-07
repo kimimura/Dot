@@ -38,7 +38,9 @@ export function renderSheet(container, table, opts = {}) {
     `<button class="lg-jump" type="button" data-st="${st}"${found[st].length ? ' title="Go to the next one"' : " disabled"}><i class="lg ${st}"></i>${label} <b>${found[st].length.toLocaleString()}</b></button>`).join("") + "</span>";
   let h = `<div class="panel xgrid-panel${opts.readonly ? " flat" : ""}"><div class="panel-head"><h2>${esc(opts.doc ? opts.doc.filename : "Extracted table")}</h2><span class="hint">${hint}</span></div>`;
   h += `<div class="csv-scroll xgrid-wrap"><table class="xgrid${opts.readonly ? " readonly" : ""}"><thead>`;
-  if (nDoc && nRow) h += `<tr class="xg-groups"><th class="corner"></th><th class="grp doc" colspan="${nDoc}">Document</th><th class="grp row" colspan="${nRow}">Rows</th></tr>`;
+  // one label per run of neighbouring columns of the same level, so the labels follow the real column order
+  const runs = cols.reduce((out, c) => { const k = c.kind === "doc" ? "doc" : "row"; if (out.length && out[out.length - 1].k === k) out[out.length - 1].n++; else out.push({ k, n: 1 }); return out; }, []);
+  if (nDoc && nRow) h += `<tr class="xg-groups"><th class="corner"></th>` + runs.map(r => `<th class="grp ${r.k}" colspan="${r.n}">${r.k === "doc" ? "Document" : "Rows"}</th>`).join("") + "</tr>";
   h += `<tr class="xg-names"><th class="corner"></th>` + cols.map((c, i) => `<th class="col ${c.kind}" data-col="${esc(c.name)}"><span class="th-in"><span class="letter">${letter(i)}</span><span class="name" title="${esc(c.name)}">${esc(c.name)}</span>${opts.readonly ? "" : `<button class="colmenu" type="button" aria-label="Column menu">⋯</button>`}</span></th>`).join("") + "</tr></thead><tbody>";
   h += range(0, shown) + `</tbody></table><div class="xgrid-more"></div></div>`;
   h += `<div class="panel-foot">${legend}<span class="sheet-count">${count()}</span></div></div>`;

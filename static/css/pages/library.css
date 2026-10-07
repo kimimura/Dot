@@ -10,7 +10,18 @@
 .spark .sp:hover .sp-bar { background: var(--ink); }
 .spark .sp-axis { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-4); }
 .tab-pane[hidden] { display: none; }
-.pdf-frame { width: 100%; height: 75vh; border: 0; display: block; }
+.doc-tabs { align-items: center; }
+.doc-tabs .tab-dl { margin-left: auto; }
+
+/* CSV, JSON and PDF share one height and each scrolls inside it */
+#tab-csv, #tab-json, #tab-pdf { height: 75vh; }
+.pdf-frame { width: 100%; height: 100%; border: 0; display: block; }
+#tab-csv:not([hidden]) { display: flex; flex-direction: column; }
+#tab-csv .xgrid-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#tab-csv .xgrid-wrap { flex: 1; min-height: 0; max-height: none; }
+#tab-csv .panel-head, #tab-csv .panel-foot { flex: none; }
+#tab-json { overflow: auto; }
+.doc-body pre.json-view { font-family: "SF Mono", Consolas, monospace; font-size: 12px; line-height: 1.55; white-space: pre; color: var(--ink-2); }
 .dm .v .st { font-size: 13px; }
 
 @media (max-width: 1060px) {

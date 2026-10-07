@@ -41,7 +41,7 @@ def build(docs, stamp, sender):
             rows = len(d["table"]["rows"])
             line += "<br>" + html.escape(config.EMAIL_FILE_LINE.format(rows=rows, s="" if rows == 1 else "s", file=name))
             # the mail step attaches this text as it is, so the file goes as plain CSV text rather than encoded bytes
-            text = sheets.csv_bytes(d["table"]).getvalue().decode("utf-8-sig")
+            text = sheets.csv_bytes(sheets.with_sender(d["table"], sender)).getvalue().decode("utf-8-sig")
             attachments.append({"Name": name, "ContentBytes": text})
         parts.append(line + "</p>")
     return {"subject": subject, "body": "".join(parts), "attachments": attachments, "to": sender,

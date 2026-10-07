@@ -12,7 +12,7 @@ views.builder = async function (docId) {
   view.className = "content page-upload";
   view.innerHTML = `
     <div class="page-head">
-      <div><h1>Profile Builder</h1><div class="sub">Teach ${esc(NAME)} a format: drop a PDF, check the sheet, fix anything in chat, and save it. From then on, Upload converts that format on its own.</div></div>
+      <div><h1>Profile Builder</h1><div class="sub">Teach ${esc(NAME)} a format: drop a PDF, check the sheet, fix anything in chat, and save it. From then on, emailed files of that format are converted on their own.</div></div>
       <div class="btn-row" id="sheet-actions"></div>
     </div>
     <div id="notes"></div>
@@ -128,7 +128,7 @@ function renderSheetActions(doc) {
   if (!box) return;
   let h = "";
   if (state.table) h += `<button class="btn" id="undo-btn" ${doc.can_undo ? "" : "disabled"}>${ICON.undo}Undo</button>`;
-  if (doc.xlsx_url) h += `<a class="btn" href="${doc.xlsx_url}">${ICON.dl}Excel</a><a class="btn" href="${doc.csv_url}">${ICON.dl}CSV</a>`;
+  if (doc.csv_url) h += `<a class="btn" href="${doc.csv_url}">${ICON.dl}CSV</a>`;
   h += `<a class="btn" href="#/builder" id="new-upload-btn">New upload</a>`;
   box.innerHTML = h;
   const u = $("#undo-btn"); if (u) u.addEventListener("click", () => act("POST", `/api/docs/${doc.id}/undo`));

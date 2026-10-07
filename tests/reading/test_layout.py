@@ -1,10 +1,12 @@
 import copy
-import io
 
 import pytest
 
 import pdfgen
+from conftest import FakeConn
+from helpers import convert, format_name
 from modules.builder import saving
+from modules.profiles import repository as profiles
 from modules.conversion import reading
 from modules.reading import layout, layout_learn, layout_places, layout_read, layout_tokens
 from core import ai as llm, db, pdftext
@@ -137,16 +139,19 @@ def becon_profile(fake_db, trained):
     return p
 
 
-def test_upload_reads_a_known_format_without_the_model(client, fake_db, trained, monkeypatch):
+def fully_verified(d):
+    ver = d["verification"]
+    return ver["checked"] and ver["verified"] == ver["total"] > 0
+
+
+def test_a_known_format_is_read_without_the_model(client, fake_db, trained, monkeypatch):
     becon_profile(fake_db, trained)
     model = Counting()
     monkeypatch.setattr(llm, "get_llm", lambda: model)
     pdf, sub = pdfgen.becon_po(pdfgen.NEW_ITEMS, po="231019", per_page=3)
-    r = client.post("/api/convert?wait=1", data={"file": (io.BytesIO(pdf), "po-231019.pdf")})
-    assert r.status_code == 200 and model.calls == 0
-    assert r.headers["X-Dot-Format"] == "BECON" and r.headers["X-Dot-Verified"] == "100.0"
-    assert r.headers["X-Dot-Format-Chosen"] == "confident"
-    d = fake_db.docs[r.headers["X-Dot-Document"]]
+    d = convert(pdf, "po-231019.pdf")
+    assert d["stage"] == "converted" and model.calls == 0
+    assert format_name(fake_db, d) == "BECON" and fully_verified(d) and d["auto_how"] == "confident"
     assert d["read_note"] is None and d["table"]["rows"] == pdfgen.becon_sheet(pdfgen.NEW_ITEMS, "231019", sub)["rows"]
 
 
@@ -155,11 +160,9 @@ def test_a_file_that_does_not_fit_goes_the_slow_way_and_says_why(client, fake_db
     model = Counting()
     monkeypatch.setattr(llm, "get_llm", lambda: model)
     pdf, _ = pdfgen.becon_po(pdfgen.NEW_ITEMS, header_extra="Discount")
-    j = client.post("/api/convert", data={"file": (io.BytesIO(pdf), "po-new-layout.pdf")}).get_json()
-    from conftest import wait_for
-    f = wait_for(lambda: next((f for f in client.get(f"/api/batches/{j['batch']}").get_json()["files"] if f["stage"] == "converted"), None))
-    assert model.calls >= 1
-    assert (f["profile_name"], f["read_note"]) == ("BECON", 'header changed: new column "Discount"')
+    d = convert(pdf, "po-new-layout.pdf")
+    assert d["stage"] == "converted" and model.calls >= 1
+    assert (format_name(fake_db, d), d["read_note"]) == ("BECON", 'header changed: new column "Discount"')
 
 
 def test_a_direct_read_that_fails_the_checks_goes_the_slow_way(client, fake_db, trained, monkeypatch):
@@ -174,8 +177,7 @@ def test_a_direct_read_that_fails_the_checks_goes_the_slow_way(client, fake_db, 
         return table, note
     monkeypatch.setattr(layout, "read_table", misread)
     pdf, _ = pdfgen.becon_po(pdfgen.NEW_ITEMS)
-    r = client.post("/api/convert?wait=1", data={"file": (io.BytesIO(pdf), "po.pdf")})
-    d = fake_db.docs[r.headers["X-Dot-Document"]]
+    d = convert(pdf, "po.pdf")
     assert model.calls >= 1 and d["read_note"] == "layout changed: 1 value didn't check out"
 
 
@@ -190,6 +192,23 @@ def test_a_format_learns_from_its_confirmed_files_the_first_time_it_is_used(fake
     lay = reading.ensure_layout(None, fake_db.profiles[p["id"]] | {})
     assert lay["variants"] and lay["learned_from"] == [d["id"]]
     assert fake_db.profiles[p["id"]]["layout"]["variants"]
+
+
+def test_a_layout_learned_while_converting_an_emailed_file_is_saved(fake_db, trained, monkeypatch):
+    pdf, sheet, _ = trained
+    p = fake_db.add_profile("BECON", pdfgen.PO_COLUMNS, pdf)
+    teach = fake_db.new_document("po-231020.pdf", pdftext.inspect(pdf))
+    teach.update(stage="confirmed", confirmed_at=db.now(), profile_id=p["id"], table=sheet)
+    fake_db.save(None, teach)
+    fake_db.pdfs[teach["id"]] = pdf
+    events, real_save = [], profiles.save
+    monkeypatch.setattr(profiles, "save", lambda conn, prof: (
+        events.append(("save", conn, bool((prof.get("layout") or {}).get("variants")))), real_save(conn, prof)))
+    monkeypatch.setattr(FakeConn, "commit", lambda self: events.append(("commit", self, None)))
+    new_pdf, _ = pdfgen.becon_po(pdfgen.NEW_ITEMS, po="231019", per_page=3)
+    convert(new_pdf, "po-231019.pdf")
+    saved = next(i for i, (kind, _, learned) in enumerate(events) if kind == "save" and learned)
+    assert any(kind == "commit" and conn is events[saved][1] for kind, conn, _ in events[saved + 1:])
 
 
 def test_confirming_a_file_teaches_its_layout(fake_db, trained, monkeypatch):
@@ -265,15 +284,15 @@ def test_a_format_taught_with_one_purchase_order_says_why_it_cannot_read_many():
     assert layout.read_table(lay, {"columns": want["columns"]}, big) == (None, "layout changed: more than one document in the file")
 
 
-def test_upload_reads_many_purchase_orders_without_the_model(client, fake_db, econ_layout, monkeypatch):
+def test_many_purchase_orders_are_read_without_the_model(client, fake_db, econ_layout, monkeypatch):
     pdf, want, _ = econ(BIG)
     p = fake_db.add_profile("ECONSAVE", [(c["name"], c["kind"]) for c in want["columns"]], pdf)
     p["layout"] = copy.deepcopy(econ_layout)
     model = Counting()
     monkeypatch.setattr(llm, "get_llm", lambda: model)
-    r = client.post("/api/convert?wait=1", data={"file": (io.BytesIO(pdf), "edi_rpt_po_dt1.pdf")})
-    assert r.status_code == 200 and model.calls == 0 and r.headers["X-Dot-Format"] == "ECONSAVE"
-    assert r.headers["X-Dot-Rows"] == str(len(want["rows"])) and r.headers["X-Dot-Verified"] == "100.0"
+    d = convert(pdf, "edi_rpt_po_dt1.pdf")
+    assert d["stage"] == "converted" and model.calls == 0 and format_name(fake_db, d) == "ECONSAVE"
+    assert len(d["table"]["rows"]) == len(want["rows"]) and fully_verified(d)
 
 
 def test_a_value_learned_as_followed_by_a_number_is_not_read_where_a_word_follows():
@@ -349,8 +368,7 @@ def test_re_read_with_current_format_always_goes_through_the_model(client, fake_
     pdf, want, _ = econ(BIG)
     p = fake_db.add_profile("ECONSAVE", [(c["name"], c["kind"]) for c in want["columns"]], pdf)
     p["layout"] = copy.deepcopy(econ_layout)
-    r = client.post("/api/convert?wait=1", data={"file": (io.BytesIO(pdf), "edi_rpt_po_dt1.pdf")})
-    did = r.headers["X-Dot-Document"]
+    did = convert(pdf, "edi_rpt_po_dt1.pdf")["id"]
     model = Counting()
     monkeypatch.setattr(llm, "get_llm", lambda: model)
     client.post(f"/api/docs/{did}/reread")

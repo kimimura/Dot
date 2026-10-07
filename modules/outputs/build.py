@@ -7,8 +7,7 @@ DATE = re.compile(r"^(\d{1,4})[/.-](\d{1,2})[/.-](\d{1,4})(?:\s+(\d{1,2}:\d{2}(?
 
 
 def key_of(column):
-    # a column linked to a standard field takes its name; any other keeps its own, written the same way
-    return column.get("field") or re.sub(r"[^a-z0-9]+", "_", column["name"].lower()).strip("_") or "column"
+    return re.sub(r"[^a-z0-9]+", "_", column["name"].lower()).strip("_") or "column"
 
 
 def standard_date(value, order):
@@ -28,10 +27,9 @@ def standard_date(value, order):
     return out
 
 
-def build(table, chain, date_order, process_date):
-    order = date_order if date_order in config.OUTPUT_DATE_ORDERS else config.OUTPUT_DATE_ORDER_DEFAULT
+def build(table, chain, process_date, received_from=""):
     cols = [(c["name"], key_of(c), c.get("kind") == "doc") for c in table["columns"]]
-    value = lambda row, name: standard_date(str(row.get(name) or "").strip(), order)
+    value = lambda row, name: standard_date(str(row.get(name) or "").strip(), config.OUTPUT_DATE_ORDER)
     orders, current = [], None
     # one entry per order in the file, in the order the orders appear
     for row, group in zip(table["rows"], doc_groups.groups(table)):
@@ -40,4 +38,4 @@ def build(table, chain, date_order, process_date):
             current = (group, {**fields, "rows": []})
             orders.append(current[1])
         current[1]["rows"].append({key: value(row, name) for name, key, is_doc in cols if not is_doc})
-    return {"chain": chain, "process_date": process_date, "orders": orders}
+    return {"chain": chain, config.OUTPUT_SENDER_KEY: received_from or "", "process_date": process_date, "orders": orders}

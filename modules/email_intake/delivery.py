@@ -2,7 +2,7 @@ import logging
 import time
 
 import config
-from core import db, webhook
+from core import activity, db, webhook
 from modules.conversion import queue as conversion
 from modules.documents import repository as documents
 from modules.email_intake import message
@@ -59,7 +59,9 @@ def run(rid):
     while not _finished(rid) and time.time() < deadline:
         time.sleep(config.EMAIL_POLL_SECONDS)
     docs = _results(rid)
-    status, error = _send(message.build(docs, req["stamp"], req["sender"]))
+    payload = message.build(docs, req["stamp"], req["sender"])
+    status, error = _send(payload)
+    activity.note(f'Reply sent to {req["sender"]}: "{payload["subject"]}"' if status == "sent" else f"Reply to {req['sender']} failed: {error}")
     conn = db.connect(tries=3)
     try:
         submissions.finish(conn, rid, status, error)

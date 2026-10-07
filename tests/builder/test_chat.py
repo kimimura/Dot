@@ -48,6 +48,15 @@ def test_column_letters_in_an_edit_become_the_columns_the_user_saw():
     assert turn({"op": "drop_col", "col": "Customer"})["col"] == "Customer"
 
 
+def test_a_place_given_by_letter_becomes_the_column_standing_there():
+    def turn(o):
+        return chat._from_sheet_letters(o, LETTERED)
+    assert turn({"op": "add_col", "name": "Store Code", "at": "B"})["at"] == "Date"
+    assert turn({"op": "move_col", "col": "F", "to": "a"}) == {"op": "move_col", "col": "ID", "to": "Invoice No"}
+    assert turn({"op": "add_col", "name": "Note", "after": "C"})["after"] == "Customer"
+    assert turn({"op": "add_col", "name": "Note", "at": "G"}) == {"op": "add_col", "name": "Note", "after": "ID"}
+
+
 def test_dot_is_told_to_pass_letters_through():
     p = chat_prompt.build(doc(["Item"]), "drop column A")
     assert 'put that letter exactly as the user wrote it' in p and "use the column's name in ops" not in p

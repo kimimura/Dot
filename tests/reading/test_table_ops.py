@@ -177,3 +177,46 @@ def test_unknown_columns_and_ops_are_reported_and_the_rest_still_applies():
     assert [c["ok"] for c in ch] == [False, False, True]
     assert ch[0]["text"] == 'No column called "Nope"'
     assert "Note" not in names(t)
+
+
+ORDER = ["PO No", "Item Code", "Quantity", "Description", "Note", "Total"]
+
+
+def test_a_new_column_placed_at_a_column_takes_its_place_and_nothing_else_moves():
+    t, ch, _ = apply({"op": "add_col", "name": "Store", "kind": "doc", "value": "ECM", "at": "Item Code"})
+    assert names(t) == ["PO No", "Store", "Item Code", "Quantity", "Description", "Note", "Total"]
+    t, _, _ = apply({"op": "add_col", "name": "Unit", "value": "PCS", "after": "Quantity"})
+    assert names(t) == ["PO No", "Item Code", "Quantity", "Unit", "Description", "Note", "Total"]
+    t, _, _ = apply({"op": "extract_col", "col": "Quantity", "into": "UOM", "pattern": r"\d+ (\w+)", "at": "Quantity"})
+    assert names(t)[:4] == ["PO No", "Item Code", "UOM", "Quantity"] and t["rows"][0]["UOM"] == "PCS"
+
+
+def test_moving_one_column_leaves_every_other_column_in_order():
+    t, _, _ = apply({"op": "move_col", "col": "Total", "to": "Item Code"})
+    assert names(t) == ["PO No", "Total", "Item Code", "Quantity", "Description", "Note"]
+    t, _, _ = apply({"op": "move_col", "col": "Item Code", "to": "Note"})
+    assert names(t) == ["PO No", "Quantity", "Description", "Note", "Item Code", "Total"]
+    t, _, _ = apply({"op": "move_col", "col": "PO No", "after": "Total"})
+    assert names(t) == ["Item Code", "Quantity", "Description", "Note", "Total", "PO No"]
+
+
+def test_taking_part_of_a_column_into_itself_trims_it_where_it_stands():
+    t, ch, _ = apply({"op": "extract_col", "col": "Quantity", "into": "Quantity", "pattern": r"^(\d+) PCS"})
+    assert names(t) == ORDER and ch[0]["ok"]
+    assert [r["Quantity"] for r in t["rows"]] == ["90", "48 TUBE", "15 TUBE"]
+
+
+def test_a_column_is_only_filled_when_your_examples_come_out_exactly():
+    t, ch, _ = apply({"op": "extract_col", "col": "Quantity", "into": "UOM", "pattern": r"\d+ (\w+)", "examples": ["pcs", " TUBE "]})
+    assert ch[0]["ok"] and [r["UOM"] for r in t["rows"]] == ["PCS", "TUBE", "TUBE"]
+    t, ch, _ = apply({"op": "extract_col", "col": "Quantity", "into": "UOM", "pattern": r"(\d+)", "examples": ["PCS"]})
+    assert names(t) == ORDER and ch[0]["text"].startswith('That gave "90", "48", "15", not your example "PCS". Nothing changed.')
+    t, ch, _ = apply({"op": "add_col", "name": "Store", "value": "", "examples": ["ECM"]},
+                     {"op": "set_col", "col": "Note", "value": "x", "examples": ["y"]})
+    assert names(t) == ORDER and [c["ok"] for c in ch] == [False, False] and "empty values" in ch[0]["text"]
+
+
+def test_a_place_that_does_not_exist_changes_nothing():
+    t, ch, _ = apply({"op": "add_col", "name": "Store", "value": "ECM", "at": "Nowhere"}, {"op": "move_col", "col": "Total"})
+    assert names(t) == ORDER and [c["ok"] for c in ch] == [False, False]
+    assert ch[0]["text"] == 'No column called "Nowhere"' and ch[1]["text"] == 'Where should "Total" go?'

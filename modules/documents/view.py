@@ -1,5 +1,7 @@
+import config
 from core import jobs
 from modules.companion import dialogue
+from modules.outputs import service as outputs
 from modules.profiles import repository as profiles
 from modules.submissions import repository as submissions
 
@@ -56,6 +58,7 @@ def envelope(conn, d, changes=None):
     options, inp = options_for(conn, d)
     prof = profiles.get(conn, d["profile_id"]) if d.get("profile_id") else None
     sub = submissions.get(conn, d["submission_id"]) if d.get("submission_id") else None
+    has_output, base = outputs.ready(d), f"/api/docs/{d['id']}"
     return {
         "doc": {
             "id": d["id"], "filename": d["filename"], "stage": d["stage"], "error": d.get("error"),
@@ -63,8 +66,11 @@ def envelope(conn, d, changes=None):
             "has_text_layer": d["has_text_layer"], "profile_id": d.get("profile_id"),
             "profile_name": prof["name"] if prof else None, "duplicate_of": d.get("duplicate_of"),
             "source": sub["source"] if sub else None, "sender": sub["sender"] if sub else None,
-            "xlsx_url": f"/api/docs/{d['id']}/download.xlsx" if d.get("table") else None,
-            "csv_url": f"/api/docs/{d['id']}/download.csv" if d.get("table") else None,
+            "sender_column": config.OUTPUT_SENDER_COLUMN,
+            "has_output": has_output,
+            "csv_url": f"{base}/download.csv" if d.get("table") else None,
+            "json_url": f"{base}/download.json" if has_output else None,
+            "pdf_url": f"{base}/download.pdf",
             "can_undo": bool(d.get("history")), "hints": d.get("hints", []), "extra_fields": d.get("extra_fields") or {},
             "signature": d.get("signature") or {},
             "reread_from": d.get("reread_from"), "reread_at": d.get("reread_at"), "reread_error": d.get("reread_error"),

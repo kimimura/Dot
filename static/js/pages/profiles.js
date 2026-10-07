@@ -15,7 +15,7 @@ views.profiles = async function (pid) {
   let profiles = [];
   try { ({ profiles } = await api("GET", "/api/profiles")); } catch (e) { toast(e.message, "f"); }
   const list = $("#profile-list");
-  if (!profiles.length) { list.innerHTML = `<div class="empty-state"><b>No profiles yet.</b><br>Upload a PDF, confirm the sheet, and say yes when ${esc(NAME)} asks to save the format.</div>`; return; }
+  if (!profiles.length) { list.innerHTML = `<div class="empty-state"><b>No profiles yet.</b><br>Drop a PDF in Profile Builder, confirm the sheet, and say yes when ${esc(NAME)} asks to save the format.</div>`; return; }
   list.innerHTML = "";
   profiles.forEach(p => list.appendChild(profileCard(p, p.id === pid)));
   if (pid) { const c = $(`[data-pid="${pid}"]`); if (c) c.scrollIntoView({ block: "start", behavior: "smooth" }); }
@@ -24,7 +24,7 @@ views.profiles = async function (pid) {
 function profileCard(p, open) {
   const card = el(`<div class="tpl-card ${open ? "" : "collapsed"}" data-pid="${p.id}">
     <div class="tpl-head"><span class="tpl-toggle">${ICON.chev}</span><span class="tpl-name-label">${esc(p.name)}</span>
-      <span class="tpl-meta">${p.columns.length} col · used ${p.times_used}× · ${p.last_used_at ? ago(p.last_used_at) : "never used"}${p.reads_directly ? ' · <span title="Upload reads files of this format straight from their learned layout">reads directly</span>' : p.layout_problem ? ` · <span title="${esc(p.layout_problem)}">can't read directly yet</span>` : ""}</span>
+      <span class="tpl-meta">${p.columns.length} col · used ${p.times_used}× · ${p.last_used_at ? ago(p.last_used_at) : "never used"}${p.reads_directly ? ' · <span title="Files of this format are read straight from their learned layout">reads directly</span>' : p.layout_problem ? ` · <span title="${esc(p.layout_problem)}">can't read directly yet</span>` : ""}</span>
       <span class="tpl-head-actions"><button class="btn small" data-a="rename">Rename</button><button class="btn small danger" data-a="delete">${ICON.trash}</button></span></div>
     <div class="panel tpl-body"><div class="tpl-loading empty-state">Loading…</div></div></div>`);
   const head = $(".tpl-head", card);

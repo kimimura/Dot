@@ -7,7 +7,7 @@ import pytest
 
 import config
 from conftest import wait_for
-from core import webhook
+from core import activity, webhook
 from core.ai.errors import LLMError
 from modules.conversion import convert
 from modules.email_intake import message, service
@@ -53,7 +53,8 @@ def test_pdfs_from_an_email_come_back_as_sheets_named_by_format(client, fake_db,
     assert [a["Name"] for a in payload["attachments"]] == [f"ACME_SalesOrder_{stamp}_1.csv", f"ACME_SalesOrder_{stamp}_2.csv",
                                                             f"Unidentified_SalesOrder_{stamp}.csv"]
     assert "a.pdf – ACME" in payload["body"] and "c.pdf – Unidentified" in payload["body"]
-    assert sheet_rows(payload["attachments"][1]) == [["Invoice No", "Item", "Qty"], ["INV-2026-0107", "A300", "3"]]
+    assert sheet_rows(payload["attachments"][1]) == [["Invoice No", "Item", "Qty", "Received From"],
+                                                     ["INV-2026-0107", "A300", "3", "sender@example.com"]]
     assert only_email(fake_db)["status"] == "sent" and len(sent) == 1
 
 
@@ -119,7 +120,8 @@ def test_results_still_go_out_after_a_restart(client, fake_db, sent, monkeypatch
     assert not sent and only_email(fake_db)["status"] == "waiting"
     monkeypatch.setattr(config, "EMAIL_INTAKE_TOKEN", TOKEN)
     service.resume()
-    assert wait_for(lambda: sent and sent[0])["subject"] == "1 PDF Received" and only_email(fake_db)["status"] == "sent"
+    wait_for(lambda: only_email(fake_db)["status"] == "sent")
+    assert [p["subject"] for p in sent] == ["1 PDF Received"]
 
 
 def test_the_message_uses_safe_file_names_and_plain_wording():
@@ -130,3 +132,16 @@ def test_the_message_uses_safe_file_names_and_plain_wording():
     assert p["subject"] == "2 PDFs Received" and [a["Name"] for a in p["attachments"]] == ["PO-ACME_SalesOrder_20261223_140031.csv"]
     assert "&lt;x&gt;.pdf – PO/ACME</b><br>1 line · PO-ACME_SalesOrder_20261223_140031.csv" in p["body"]
     assert "y.pdf – Still processing</b></p>" in p["body"]
+
+
+def test_the_terminal_shows_what_happens_to_an_email(client, fake_db, sent, monkeypatch, acme_pdf, acme2_pdf, orbit_pdf):
+    lines = []
+    monkeypatch.setattr(activity, "note", lines.append)
+    fake_db.add_profile("ACME", [("Invoice No", "doc"), ("Item", "row"), ("Qty", "row")], acme_pdf)
+    send(client, [{"filename": "a.pdf", "content": b64(acme2_pdf)}, {"filename": "c.pdf", "content": b64(orbit_pdf)}])
+    wait_for(lambda: any(line.startswith("Reply sent") for line in lines))
+    assert lines[0] == "Email from sender@example.com: 2 PDFs"
+    assert "Reading a.pdf" in lines and "Reading c.pdf" in lines
+    assert any(line.startswith("Done: a.pdf: ACME, read by the model, 1 row, ") for line in lines)
+    assert any(line.startswith("Done: c.pdf: unknown format, read by the model, ") for line in lines)
+    assert lines[-1] == 'Reply sent to sender@example.com: "2 PDFs Received"'

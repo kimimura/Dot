@@ -1,9 +1,11 @@
 RETRY_MARKERS = ("429", "500", "502", "503", "504", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "DEADLINE", "overloaded")
 RATE_MARKERS = ("429", "resource_exhausted", "quota", "rate limit")
+OVERLOAD_MARKERS = ("503", "unavailable", "overloaded", "high demand")
 
 # what the user sees; deliberately says nothing about what is behind the companion
 BUSY = "timed out"
 DAILY = "daily limit reached — try again tomorrow"
+NO_MODEL = "no reading model is set up"
 GARBLED = "unreadable result"
 CUT_OFF = "reply was cut off before it finished"
 

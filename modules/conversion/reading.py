@@ -26,7 +26,7 @@ def ensure_layout(conn, prof):
 
 
 def read_direct(conn, d, prof, texts):
-    # Upload only: a known format is read straight from its learned layout; anything that doesn't fit goes to the model
+    # a known format is read straight from its learned layout; anything that doesn't fit goes to the model
     table, note = layout.read_table(ensure_layout(conn, prof), prof, texts)
     if table:
         ver = verify.verify(table, "\n\n".join(texts), True)

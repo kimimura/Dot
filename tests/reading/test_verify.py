@@ -164,6 +164,13 @@ def test_orders_that_repeat_exactly_are_still_checked_row_by_row():
     assert yellow(verify.verify(t, text, True)) == ["10|Description"]
 
 
+@pytest.mark.parametrize("pdf, ok", [("Board Marker W20 -\nBlack (254099)", True), ("Board Marker W20\n- Black (254099)", True),
+                                     ("Board Marker W20\nBlack (254099)", False), ("Board Marker W20 -\nBlue (254099)", False)])
+def test_a_separator_may_end_one_line_or_start_the_next_when_a_value_wraps(pdf, ok):
+    lines = verify.strict_lines("9 1480521-01 Faber-Castell White " + pdf + "\nPP001-00 80 PCS 1.3900")
+    assert verify.printed("Faber-Castell White Board Marker W20 - Black (254099)", lines) is ok
+
+
 def test_separators_the_pdf_prints_may_be_left_out(wrapped):
     text, truth = wrapped
     t = copy.deepcopy(truth)

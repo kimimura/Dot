@@ -1,8 +1,7 @@
-import io
-
 from conftest import wait_for
 
 from core import locks
+from helpers import convert
 from modules.conversion import queue
 from modules.documents import repository as documents
 from core import ai as llm
@@ -11,7 +10,7 @@ from modules.profiles import hints as hint_rules
 
 
 def converted(client, pdf, name="acme.pdf"):
-    return client.post("/api/convert?wait=1", data={"file": (io.BytesIO(pdf), name)}).headers["X-Dot-Document"]
+    return convert(pdf, name)["id"]
 
 
 def doc(client, did):

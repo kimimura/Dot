@@ -20,6 +20,8 @@ COMPANION_NAME = env("COMPANION_NAME", default="Dot")
 HOST = env("HOST", default="127.0.0.1")
 PORT = int(env("PORT", default="5000"))
 SERVER_THREADS = 4
+ACTIVITY_TIME_FORMAT = "%H:%M:%S"
+SERVER_BUSY_MESSAGE = "Busy: all {threads} workers are in use, {waiting} request{s} waiting"
 REQUEST_MAX_BYTES = 50 * 1024 * 1024
 STATIC_DIR = ROOT / "static"
 TEMPLATE_DIR = ROOT / "templates"
@@ -42,7 +44,10 @@ MIGRATIONS = ROOT / "migration"
 # ── model ────────────────────────────────────────────────────────────────────
 AI_PROVIDER = env("LLM_PROVIDER")
 AI_KEY = env("LLM_API_KEY", "GEMINI_API_KEY", "API_KEY")
-AI_MODEL = env("LLM_MODEL", "GEMINI_MODEL", default="gemini-2.5-flash")
+# tried in this order; when one is used up the next takes over
+AI_MODELS = [m.strip() for m in env("LLM_MODELS", "LLM_MODEL", "GEMINI_MODEL").split(",") if m.strip()]
+AI_DAILY_RESET_UTC_HOUR = 8
+AI_OVERLOAD_REST = 60
 AI_RPM = int(env("LLM_RPM", default="15"))
 AI_TEMPERATURE = 0.1
 AI_CHAT_MAX_REPLY_TOKENS = 16384
@@ -110,7 +115,6 @@ REREAD_MIN_MATCHED = 0.9
 REREAD_LOOKAHEAD = 8
 REREAD_SIMILAR = 0.85
 LIBRARY_LIST_LIMIT = 500
-BATCH_ID_MAX_CHARS = 32
 
 # ── stats ────────────────────────────────────────────────────────────────────
 STATS_TOP_FORMATS = 8
@@ -118,13 +122,11 @@ STATS_WEEK_DAYS = 7
 STATS_CHART_DAYS = 14
 
 # ── standard output ──────────────────────────────────────────────────────────
-OUTPUT_ORDER_FIELDS = ["order_number", "store_code", "ship_to_code", "order_date", "delivery_date", "fax", "phone", "email",
-                       "grand_total"]
-OUTPUT_ROW_FIELDS = ["item_code", "item_desc", "barcode", "qty_unit", "conversion", "order_qty", "uom", "unit_price", "amount"]
-OUTPUT_REQUIRED_FIELDS = ["order_number", "item_code", "order_qty"]
-OUTPUT_DATE_ORDERS = ["dmy", "mdy", "ymd"]
-OUTPUT_DATE_ORDER_DEFAULT = "dmy"
+OUTPUT_DATE_ORDER = "dmy"
 OUTPUT_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+OUTPUT_SENDER_COLUMN = "Received From"
+OUTPUT_SENDER_KEY = "received_from"
+OUTPUT_UNIDENTIFIED = "Unidentified"
 
 # ── email intake ─────────────────────────────────────────────────────────────
 EMAIL_INTAKE_TOKEN = env("EMAIL_INTAKE_TOKEN")

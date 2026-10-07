@@ -56,3 +56,14 @@ def test_column_lists_are_not_kept_as_hints():
     assert not hint_rules.useful_hint("The columns are PO No, Date, Item Code and Quantity", cols)
     assert not hint_rules.useful_hint("PO No, Date, Item Code", cols)
     assert not hint_rules.useful_hint("", cols)
+
+
+def test_deleting_one_of_several_teaching_files_unlearns_it(fake_db, acme_pdf, orbit_pdf):
+    p = fake_db.add_profile("ACME", ACME_COLS, acme_pdf)
+    kept, wrong = fake_db.new_document("acme.pdf", pdftext.inspect(acme_pdf)), fake_db.new_document("orbit.pdf", pdftext.inspect(orbit_pdf))
+    for d in (kept, wrong):
+        fake_db.docs[d["id"]].update(stage="confirmed", profile_id=p["id"])
+    p["fingerprint"]["doc_ids"] = [kept["id"], wrong["id"]]
+    learning.forget(None, p["id"], wrong["id"])
+    fp = fake_db.profiles[p["id"]]["fingerprint"]
+    assert fp["doc_ids"] == [kept["id"]] and set(fp["tokens"]) == set(kept["tokens"])

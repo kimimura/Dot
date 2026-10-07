@@ -244,9 +244,14 @@ def _runs_on(chars, lines, plain, at_start, first, begins=None):
             return True
         cuts = [len(have)] if at_start else [m for m in range(1, len(want)) if want[m - 1] == have[-1]]
         for m in cuts:
-            if m < len(want) and have.endswith(want[:m]) and _fits(chars[:after[m - 1]], lines[i], at_start, True) \
-                    and _runs_on(chars[after[m - 1]:], lines, plain, True, i + 1):
-                return True
+            if m >= len(want) or not have.endswith(want[:m]):
+                continue
+            end = after[m - 1]
+            nxt = next((k for k in range(end, len(chars)) if "a" <= chars[k] <= "z" or "0" <= chars[k] <= "9"), end)
+            # a separator between the two parts, like the dash in "W20 - Black", may end this line or start the next
+            for k in {end, nxt}:
+                if _fits(chars[:k], lines[i], at_start, True) and _runs_on(chars[k:], lines, plain, True, i + 1):
+                    return True
     return False
 
 

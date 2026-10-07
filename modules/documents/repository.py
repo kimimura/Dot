@@ -118,7 +118,8 @@ def delete(conn, did):
 
 def list_docs(conn, q=None, unfinished=False, limit=config.LIBRARY_LIST_LIMIT):
     sql = ("SELECT d.id, d.filename, d.uploaded_at, d.confirmed_at, d.stage, d.profile_id, d.n_pages, d.n_rows,"
-           " d.verified_pct, d.has_text_layer, p.name AS profile_name, s.source, s.sender"
+           " d.verified_pct, d.has_text_layer, p.name AS profile_name, s.source, s.sender,"
+           " (SELECT COUNT(*) FROM documents x WHERE x.profile_id=d.profile_id AND x.stage='confirmed') AS teachers"
            " FROM documents d LEFT JOIN profiles p ON p.id=d.profile_id LEFT JOIN submissions s ON s.id=d.submission_id")
     where, args = [], []
     if q:
@@ -136,6 +137,7 @@ def list_docs(conn, q=None, unfinished=False, limit=config.LIBRARY_LIST_LIMIT):
         d = dict(r)
         d["has_text_layer"] = bool(d["has_text_layer"])
         d["has_output"] = d["stage"] in ("confirmed", "converted", "rereading")
+        d["teaches"] = bool(d["profile_id"]) and d["stage"] == "confirmed"
         out.append(d)
     return out
 
@@ -153,6 +155,11 @@ def store_pdf(conn, doc_id, data):
 def load_pdf(conn, doc_id):
     r = conn.execute("SELECT pdf_data FROM document_files WHERE document_id=?", (doc_id,)).fetchone()
     return bytes(r["pdf_data"]) if r and r["pdf_data"] else None
+
+
+def teachers(conn, pid):
+    # the files a format learns from: deleting one of them makes the format forget it
+    return conn.execute("SELECT COUNT(*) n FROM documents WHERE profile_id=? AND stage='confirmed'", (pid,)).fetchone()["n"]
 
 
 def confirmed_ids(conn, pid, exclude):

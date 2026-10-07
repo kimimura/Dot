@@ -104,8 +104,13 @@ class FakeDb:
             sub = self.submissions.get(d.get("submission_id")) or {}
             row["source"], row["sender"] = sub.get("source"), sub.get("sender")
             row["has_output"] = d["stage"] in ("confirmed", "converted", "rereading")
+            row["teaches"] = bool(d.get("profile_id")) and d["stage"] == "confirmed"
+            row["teachers"] = self.teachers(conn, d.get("profile_id"))
             out.append(row)
         return out[:limit]
+
+    def teachers(self, conn, pid):
+        return sum(1 for d in self.docs.values() if pid and d.get("profile_id") == pid and d["stage"] == "confirmed")
 
     def add_profile(self, name, columns, pdf_bytes):
         info = pdftext.inspect(pdf_bytes)
@@ -139,6 +144,7 @@ class FakeDb:
         mp.setattr(documents, "list_submission", self.list_submission)
         mp.setattr(documents, "list_docs", self.list_docs)
         mp.setattr(documents, "confirmed_ids", self.confirmed_ids)
+        mp.setattr(documents, "teachers", self.teachers)
         mp.setattr(documents, "pending", lambda conn: [d["id"] for d in self.docs.values() if d["stage"] in ("queued", "converting", "rereading")])
         mp.setattr(documents, "rereadable", lambda conn, pid: [d["id"] for d in sorted(self.docs.values(), key=lambda d: d["uploaded_at"])
                                                              if d.get("profile_id") == pid and d["stage"] in ("confirmed", "converted")])

@@ -3,7 +3,7 @@ import { state } from "../shared/state.js";
 import { views } from "../shared/views.js";
 import { api, toast } from "../shared/api.js";
 import { setCrumb } from "../shared/shell.js";
-import { sourcePill } from "../shared/labels.js";
+import { deleteWarning, rereadWarning, sourcePill, teachTag } from "../shared/labels.js";
 import { pctOf, renderSheet } from "../shared/sheet.js";
 
 views.library = async function (docId) {
@@ -34,13 +34,13 @@ views.library = async function (docId) {
   if (!docs.length) { t.innerHTML = `<div class="empty-state">${state.search ? "Nothing matches that search." : `<b>Nothing here yet.</b><br>PDFs sent by email or dropped in Profile Builder land here once ${esc(NAME)} has read them.`}</div>`; return; }
   t.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Document</th><th>Format</th><th class="n">Rows</th><th class="n">Verified</th><th>Source</th><th></th></tr></thead><tbody>` +
     docs.map(d => `<tr class="click" data-id="${d.id}"><td><span class="po">${esc(d.filename)}</span><div class="fn">${fmtDate(d.uploaded_at)} · ${d.n_pages} page${d.n_pages === 1 ? "" : "s"}</div></td>
-      <td>${d.profile_name ? `<a href="#/profiles/${d.profile_id}">${esc(d.profile_name)}</a>` : '<span class="hint">—</span>'}</td>
+      <td>${d.profile_name ? `<a href="#/profiles/${d.profile_id}">${esc(d.profile_name)}</a>${teachTag(d)}` : '<span class="hint">—</span>'}</td>
       <td class="n">${d.n_rows}</td><td class="n">${d.verified_pct != null ? d.verified_pct + "%" : '<span class="hint">n/a</span>'}</td>
       <td>${sourcePill(d.source, d.stage, d.sender)}</td>
       <td class="n"><span class="row-actions">${d.has_output ? `<a class="icon-btn sm" href="/api/docs/${d.id}/download.csv" title="Download CSV">${ICON.dl}</a>` : (d.stage === "queued" || d.stage === "converting") ? '<span class="hint">converting…</span>' : `<a class="btn small" href="#/builder/${d.id}">Resume</a>`}<button class="icon-btn sm" data-del="${d.id}" title="Delete">${ICON.trash}</button></span></td></tr>`).join("") + "</tbody></table></div>";
   t.addEventListener("click", async e => {
     const del = e.target.closest("[data-del]");
-    if (del) { e.stopPropagation(); if (confirm("Delete this document and its files?")) { await api("DELETE", `/api/docs/${del.dataset.del}`); views.library(); } return; }
+    if (del) { e.stopPropagation(); if (confirm(deleteWarning(docs.find(x => x.id === del.dataset.del) || {}))) { await api("DELETE", `/api/docs/${del.dataset.del}`); views.library(); } return; }
     if (e.target.closest("a, button")) return;
     const tr = e.target.closest("tr[data-id]"); if (tr) location.hash = `#/library/${tr.dataset.id}`;
   });
@@ -61,7 +61,7 @@ views.doc = async function (id) {
   view.innerHTML = `<a class="btn backbtn" href="${from}">${ICON.back}Back</a>
     <div class="page-head"><div><h1>${esc(d.filename)}</h1><div class="detail-meta">
       <div class="dm"><div class="k">Uploaded</div><div class="v">${fmtDate(d.uploaded_at)}</div></div>
-      <div class="dm"><div class="k">Format</div><div class="v">${d.profile_name ? `<a href="#/profiles/${d.profile_id}">${esc(d.profile_name)}</a>` : "—"}</div></div>
+      <div class="dm"><div class="k">Format</div><div class="v">${d.profile_name ? `<a href="#/profiles/${d.profile_id}">${esc(d.profile_name)}</a>${teachTag(d)}` : "—"}</div></div>
       <div class="dm"><div class="k">Source</div><div class="v">${sourcePill(d.source, d.stage, d.sender)}</div></div>
       <div class="dm"><div class="k">Rows</div><div class="v">${env.table ? env.table.rows.length : 0}</div></div>
       <div class="dm"><div class="k">Verified</div><div class="v">${ver && ver.checked ? pctOf(ver.verified, ver.total) + "%" : "n/a"}</div></div></div></div>
@@ -95,9 +95,11 @@ views.doc = async function (id) {
   $$(".doc-tab").forEach(b => b.addEventListener("click", () => show(b.dataset.t)));
   const rb = $("#revise-btn"); if (rb) rb.addEventListener("click", async () => { await api("POST", `/api/docs/${d.id}/revise`); location.hash = `#/builder/${d.id}`; });
   const vb = $("#review-btn"); if (vb) vb.addEventListener("click", async () => { await api("POST", `/api/docs/${d.id}/review`); location.hash = `#/builder/${d.id}`; });
-  $("#del-btn").addEventListener("click", async () => { if (confirm("Delete this document and its files?")) { await api("DELETE", `/api/docs/${d.id}`); location.hash = "#/library"; } });
+  $("#del-btn").addEventListener("click", async () => { if (confirm(deleteWarning(d))) { await api("DELETE", `/api/docs/${d.id}`); location.hash = "#/library"; } });
   const rr = $("#reread-btn");
   if (rr) rr.addEventListener("click", async () => {
+    const warn = rereadWarning(d);
+    if (warn && !confirm(warn)) return;
     rr.disabled = true;
     try { const e2 = await api("POST", `/api/docs/${d.id}/reread`); const c = e2.changes[0]; if (c && !c.ok) toast(c.text, "f"); }
     catch (err) { toast(err.message, "f"); }

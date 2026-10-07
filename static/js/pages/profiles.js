@@ -77,7 +77,8 @@ async function loadProfileBody(card, pid) {
     if (b.dataset.hint !== undefined) { hints.splice(+b.dataset.hint, 1); b.closest(".field-row").remove(); }
     if (b.dataset.a === "add") { const n = $('[data-new="name"]', body).value.trim(); if (!n) return; cols.push({ name: n, kind: $('[data-new="kind"]', body).value, hint: $('[data-new="hint"]', body).value.trim(), seen: 0 }); $('[data-new="name"]', body).value = ""; $('[data-new="hint"]', body).value = ""; drawCols(); }
     if (b.dataset.a === "reread") {
-      if (!confirm(`Re-read every ${p.name} file with the saved format? Each file keeps its current sheet until the new one is ready, and each re-read can be undone from the file's Library page.`)) return;
+      const taught = p.n_docs ? ` ${p.n_docs === 1 ? "This includes the file" : `This includes the ${p.n_docs} files`} ${p.name} learns from: ${p.n_docs === 1 ? "its sheet is" : "their sheets are"} replaced by a new read by the model (uses tokens).` : "";
+      if (!confirm(`Re-read every ${p.name} file with the saved format? Each file keeps its current sheet until the new one is ready, and each re-read can be undone from the file's Library page.${taught}`)) return;
       b.disabled = true;
       try {
         const r = await api("POST", `/api/profiles/${p.id}/reread`);

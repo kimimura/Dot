@@ -4,15 +4,16 @@ import re
 import config
 from core import pdftext
 from core.ai.errors import LLMError, Truncated
-from modules.builder import chat_prompt
+from modules.builder import chat_prompt, chat_scope
 from modules.builder.answers import on_answer
 from modules.builder.edits import alias_hints, column_notes, settle_hints
 from modules.builder.review import ask_review
 from modules.builder.saving import after_yes
 from modules.companion import dialogue
+from modules.conversion import reading
 from modules.documents import history, repository as documents, transcript
 from modules.profiles import hints as hint_rules, repository as profiles
-from modules.reading import column_reread, extract, table_ops, verify
+from modules.reading import column_reread, table_ops, verify
 
 
 YES = re.compile(r"^\s*(y|yes|yeah|yep|yup|correct|right|ok|okay|sure|looks good|that's it|thats it|perfect|good)\b", re.I)
@@ -29,6 +30,20 @@ def _shrink(before, after):
     if lost_r > 0 and (nr == 0 or (lost_r >= 5 and lost_r * 2 >= orr)):
         return "remove %d of your %d rows" % (lost_r, orr)
     return None
+
+
+def no_typing(ops):
+    # the chat model sees only some of the rows, so a column's values are never typed out by it: they are read from the PDF
+    out = []
+    for o in ops:
+        vals = o.get("values")
+        if o.get("op") in ("set_col", "add_col") and isinstance(vals, list) and len(vals) > config.CHAT_MAX_TYPED_VALUES:
+            if o["op"] == "add_col":
+                out.append({k: v for k, v in o.items() if k != "values"})
+            out.append({"op": "reread_cols", "cols": [o.get("name") if o["op"] == "add_col" else o.get("col")]})
+            continue
+        out.append(o)
+    return out
 
 
 def _apply_revision(conn, llm, d, pdf, reply, op_list, new_hints, message="", forced=False):
@@ -48,30 +63,37 @@ def _apply_revision(conn, llm, d, pdf, reply, op_list, new_hints, message="", fo
     table, extra = before, d.get("extra_fields")
     hints = list(d["hints"])
     changes = []
+    op_list = no_typing(op_list)
     re_ops = [o for o in op_list if o.get("op") == "reextract"]
-    col_ops = [o for o in op_list if o.get("op") == "reread_cols"]
-    other = [o for o in op_list if o.get("op") not in ("reextract", "reread_cols")]
     for h in new_hints:
         hints.append({"scope": h.get("scope", "profile"), "col": h.get("col"), "text": str(h["text"]).strip()})
     edited = {k for k, v in (d.get("verification") or {}).get("cells", {}).items() if v == "edited"}
     if re_ops:
+        # reading the whole file again is the reading models' job; the chat model only said how
         prof = profiles.get(conn, d["profile_id"]) if d.get("profile_id") else None
         try:
-            table, sig, extra = extract.run(llm, pdf, prof, hints, instruction=re_ops[0].get("instruction") or message)
+            table, sig, extra = reading.model_read(llm, d, pdf, prof, pdftext.page_texts(pdf), hints,
+                                                        instruction=re_ops[0].get("instruction") or message, keep_new=True)
             edited = set()
             changes.append({"ok": True, "text": "Re-read the document"})
         except LLMError as e:
             changes.append({"ok": False, "text": "re-read failed: %s" % e})
-    for o in col_ops:
-        table, ch, edited = column_reread.run(llm, pdf, table, o.get("cols") or [o.get("col")], edited, column_notes(hints))
+    shaped, shaped_changes = [], []
+    # the steps run in the order given, so a column is made before it is filled from the PDF
+    for o in (o for o in op_list if o.get("op") != "reextract"):
+        if o.get("op") == "reread_cols":
+            cols = o.get("cols") or [o.get("col")]
+            table, ch, edited = column_reread.run(llm, pdf, table, cols, edited, column_notes(hints))
+            changes += ch
+            continue
+        if o.get("op") == "drop_col":
+            hints.append({"scope": "col", "col": str(o.get("col")), "text": 'Do not extract "%s"' % o.get("col"), "dropped": True})
+        table, ch, edited = table_ops.apply_ops(table, [o], edited, typed_by_model=True)
         changes += ch
-    if other:
-        for o in other:
-            if o.get("op") == "drop_col":
-                hints.append({"scope": "col", "col": str(o.get("col")), "text": 'Do not extract "%s"' % o.get("col"), "dropped": True})
-        table, ch, edited = table_ops.apply_ops(table, other, edited, typed_by_model=True)
-        changes += ch
-        hints = settle_hints(hints, other, ch, table)
+        shaped.append(o)
+        shaped_changes += ch
+    if shaped:
+        hints = settle_hints(hints, shaped, shaped_changes, table)
     verification = verify.verify(table, pdftext.text_of(pdf), d["has_text_layer"], edited=edited)
 
     danger = None if forced else _shrink(before, table)
@@ -198,8 +220,12 @@ def _from_sheet_letters(o, columns):
 
 
 def _revise(conn, llm, d, pdf, message):
+    # the chat model gets the rows this message is about and only the pages they are printed on, never the whole file
+    texts = pdftext.page_texts(pdf)
+    shown, pages = chat_scope.pick(d, message, texts)
+    part = pdf if len(pages) >= len(texts) else pdftext.picked(pdf, pages)
     try:
-        raw = llm.complete(pdf, chat_prompt.build(d, message), kind="chat")
+        raw = llm.complete(part, chat_prompt.build(d, message, shown, pages, len(texts)), kind="chat")
     except Truncated:
         d["stage"] = "revising"
         transcript.bot(d, text="That reply got cut off before it finished, so nothing changed. Ask for a smaller change, "

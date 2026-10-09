@@ -155,17 +155,17 @@ def test_a_known_format_is_read_without_the_model(client, fake_db, trained, monk
     assert d["read_note"] is None and d["table"]["rows"] == pdfgen.becon_sheet(pdfgen.NEW_ITEMS, "231019", sub)["rows"]
 
 
-def test_a_file_that_does_not_fit_goes_the_slow_way_and_says_why(client, fake_db, trained, monkeypatch):
+def test_an_emailed_file_that_does_not_fit_is_not_guessed_and_says_why(client, fake_db, trained, monkeypatch):
     becon_profile(fake_db, trained)
     model = Counting()
     monkeypatch.setattr(llm, "get_llm", lambda: model)
     pdf, _ = pdfgen.becon_po(pdfgen.NEW_ITEMS, header_extra="Discount")
     d = convert(pdf, "po-new-layout.pdf")
-    assert d["stage"] == "converted" and model.calls >= 1
-    assert (format_name(fake_db, d), d["read_note"]) == ("BECON", 'header changed: new column "Discount"')
+    assert d["stage"] == "failed" and model.calls == 0 and not d["table"]
+    assert (format_name(fake_db, d), d["error"]) == ("BECON", 'BECON, header changed: new column "Discount"; open it in Profile Builder')
 
 
-def test_a_direct_read_that_fails_the_checks_goes_the_slow_way(client, fake_db, trained, monkeypatch):
+def test_a_read_that_fails_the_checks_is_never_sent_out(client, fake_db, trained, monkeypatch):
     becon_profile(fake_db, trained)
     model = Counting()
     monkeypatch.setattr(llm, "get_llm", lambda: model)
@@ -178,7 +178,7 @@ def test_a_direct_read_that_fails_the_checks_goes_the_slow_way(client, fake_db, 
     monkeypatch.setattr(layout, "read_table", misread)
     pdf, _ = pdfgen.becon_po(pdfgen.NEW_ITEMS)
     d = convert(pdf, "po.pdf")
-    assert model.calls >= 1 and d["read_note"] == "layout changed: 1 value didn't check out"
+    assert model.calls == 0 and d["stage"] == "failed" and d["read_note"] == "layout changed: 1 value didn't check out"
 
 
 def test_a_format_learns_from_its_confirmed_files_the_first_time_it_is_used(fake_db, trained):
@@ -202,8 +202,8 @@ def test_a_layout_learned_while_converting_an_emailed_file_is_saved(fake_db, tra
     fake_db.save(None, teach)
     fake_db.pdfs[teach["id"]] = pdf
     events, real_save = [], profiles.save
-    monkeypatch.setattr(profiles, "save", lambda conn, prof: (
-        events.append(("save", conn, bool((prof.get("layout") or {}).get("variants")))), real_save(conn, prof)))
+    monkeypatch.setattr(profiles, "save", lambda conn, prof, edited=False: (
+        events.append(("save", conn, bool((prof.get("layout") or {}).get("variants")))), real_save(conn, prof, edited)))
     monkeypatch.setattr(FakeConn, "commit", lambda self: events.append(("commit", self, None)))
     new_pdf, _ = pdfgen.becon_po(pdfgen.NEW_ITEMS, po="231019", per_page=3)
     convert(new_pdf, "po-231019.pdf")
@@ -364,7 +364,7 @@ def test_a_sheet_that_mostly_disagrees_with_the_pdf_teaches_nothing():
     assert not lay["variants"] and lay["last_problem"]
 
 
-def test_re_read_with_current_format_always_goes_through_the_model(client, fake_db, econ_layout, monkeypatch):
+def test_re_read_with_current_format_uses_the_layout_and_never_the_model(client, fake_db, econ_layout, monkeypatch):
     pdf, want, _ = econ(BIG)
     p = fake_db.add_profile("ECONSAVE", [(c["name"], c["kind"]) for c in want["columns"]], pdf)
     p["layout"] = copy.deepcopy(econ_layout)
@@ -373,5 +373,58 @@ def test_re_read_with_current_format_always_goes_through_the_model(client, fake_
     monkeypatch.setattr(llm, "get_llm", lambda: model)
     client.post(f"/api/docs/{did}/reread")
     from conftest import wait_for
-    wait_for(lambda: client.get(f"/api/docs/{did}").get_json()["doc"]["stage"] != "rereading")
-    assert model.calls >= 1
+    env = wait_for(lambda: (e := client.get(f"/api/docs/{did}").get_json())["doc"]["stage"] != "rereading" and e)
+    assert model.calls == 0 and env["doc"]["reread_error"] is None and env["doc"]["can_undo_reread"]
+    assert len(env["table"]["rows"]) == len(want["rows"])
+
+
+ACME_ROWS = [("INV-2026-0091", "A100", "Blue Widget", "10", "50.00"), ("INV-2026-0091", "A200", "Red Widget", "5", "150.00")]
+ACME_FULL = ["Invoice No", "Item", "Description", "Qty", "Price"]
+
+
+@pytest.mark.parametrize("keep", [["Invoice No", "Item", "Qty", "Price"], ["Invoice No", "Item", "Description", "Qty"], ["Invoice No", "Description", "Price"]])
+def test_columns_the_user_dropped_are_skipped_on_every_new_file(keep):
+    sheet = {"columns": [{"name": c, "kind": "doc" if c == "Invoice No" else "row"} for c in keep],
+             "rows": [{"_doc": 0, **{c: v for c, v in zip(ACME_FULL, r) if c in keep}} for r in ACME_ROWS]}
+    lay = layout.add(None, sheet, pdftext.page_texts(pdfgen.acme(1)), "taught")
+    table, note = layout.read_table(lay, {"columns": sheet["columns"]}, pdftext.page_texts(pdfgen.acme(2)))
+    want = dict(zip(ACME_FULL, ("INV-2026-0107", "A300", "Green Widget", "3", "100.00")))
+    assert note is None and [{k: v for k, v in r.items() if k != "_doc"} for r in table["rows"]] == [{c: want[c] for c in keep}]
+
+
+def boxes_po(items, extra=(), missing=()):
+    # a PO whose items may carry a pack line under them ("6 BOXES 5.00 4.21") that the sheet doesn't keep
+    ops, y = [pdfgen.text(50, 800, "PURCHASE ORDER", 16), pdfgen.text(50, 780, "PO No: PO-55001"), pdfgen.text(50, 760, "Item Description Qty Amount")], 740
+    rows = []
+    for i, (code, desc, qty, amount) in enumerate(items):
+        if i in missing:
+            continue
+        ops.append(pdfgen.text(50, y, f"{code} {desc} {qty} {amount}"))
+        y -= 16
+        if i in extra:
+            ops.append(pdfgen.text(50, y, "6 BOXES 5.00 4.21"))
+            y -= 16
+        rows.append({"_doc": 0, "PO No": "PO-55001", "Item": code, "Description": desc, "Qty": qty, "Amount": amount})
+    ops.append(pdfgen.text(50, y - 20, "Thank you for your business"))
+    sheet = {"columns": [{"name": "PO No", "kind": "doc"}] + [{"name": c, "kind": "row"} for c in ("Item", "Description", "Qty", "Amount")], "rows": rows}
+    return pdfgen.build([ops]), sheet
+
+
+BOX_ITEMS = [("543000158", "FC CLICK BPEN BLACK", "10", "61.20"), ("543000134", "FC GRIP X7 BPEN BLUE", "20", "71.80"),
+             ("543710026", "FC ERASER SIZE 48", "5", "18.30"), ("543000135", "FC GRIP X7 BPEN MIX", "12", "43.08"),
+             ("543010056", "FC RXGEL PEN BLACK", "6", "17.16")]
+
+
+def test_a_printed_line_the_sheet_leaves_out_is_learned_and_skipped_on_new_files():
+    pdf, sheet = boxes_po(BOX_ITEMS, extra={1})
+    lay = layout.add(None, sheet, pdftext.page_texts(pdf), "taught")
+    assert "last_problem" not in lay and lay["variants"][0]["skip_lines"] == ["# BOXES # #"]
+    new, want = boxes_po(BOX_ITEMS, extra={0, 3})
+    table, note = layout.read_table(lay, {"columns": sheet["columns"]}, pdftext.page_texts(new))
+    assert note is None and [r["Item"] for r in table["rows"]] == [r["Item"] for r in want["rows"]]
+
+
+def test_a_line_of_numbers_alone_is_never_learned_as_one_to_skip():
+    pdf, sheet = boxes_po(BOX_ITEMS, extra={1})
+    lay = layout.add(None, sheet, pdftext.page_texts(pdf), "taught")
+    assert all(any(t != "#" for t in shape.split()) for shape in lay["variants"][0]["skip_lines"])

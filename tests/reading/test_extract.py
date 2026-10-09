@@ -170,3 +170,21 @@ def test_a_reply_that_runs_out_of_room_is_split_and_retried(long_po, small_chunk
     pdf, truth, texts = long_po
     table, _, _ = extract.run(PageReader(truncate_over=4), pdf, texts=texts)
     assert got(table) == truth
+
+
+def test_every_request_is_said_in_the_terminal(long_po, small_chunks, monkeypatch):
+    pdf, truth, texts = long_po
+    lines = []
+    monkeypatch.setattr(extract.activity, "note", lines.append)
+    extract.run(PageReader(truncate_over=4), pdf, texts=texts, name="big.pdf")
+    assert lines[0].startswith("big.pdf: request 1, pages 1-") and "answer cut off, asking again in two halves" in lines[0]
+    assert all(line.startswith("big.pdf: request ") for line in lines) and len(lines) == len(set(lines))
+    assert any(line.endswith(" rows") and "of 24:" in line for line in lines)
+
+
+def test_a_long_file_that_reads_cleanly_is_never_stopped_however_many_pieces_it_takes(long_po, small_chunks, monkeypatch):
+    pdf, truth, texts = long_po
+    monkeypatch.setattr(extract.activity, "note", lambda text: None)
+    reader = PageReader()
+    table, _, _ = extract.run(reader, pdf, texts=texts)
+    assert got(table) == truth and reader.calls > 1

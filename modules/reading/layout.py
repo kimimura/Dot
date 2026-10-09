@@ -52,6 +52,7 @@ def add(layout, table, texts, doc_id):
                 if key in b:
                     a[key] = b[key]
         same["fields"], same["header"] = v["fields"], v["header"]
+        same["skip_lines"] = sorted(set(same.get("skip_lines") or ()) | set(v.get("skip_lines") or ()))
         layout["variants"].remove(same)
         v = same
     layout["variants"] = ([v] + layout["variants"])[:config.LAYOUT_MAX_VARIANTS]

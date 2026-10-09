@@ -1,6 +1,7 @@
 import hashlib
 import io
 import re
+import threading
 from dataclasses import dataclass, field
 
 import pdfplumber
@@ -17,6 +18,10 @@ also only more most other some such same both either neither if so do does did d
 have had here there where when which who whom whose what why how one two three four five
 six seven eight nine ten please thank thanks dear sir madam ref re
 """.split())
+
+
+# the PDF library can only be used by one thread at a time; two at once corrupt its memory and stop the whole app
+_pdfium_turn = threading.Lock()
 
 
 class PdfError(Exception):
@@ -103,11 +108,12 @@ def _tokens_from_lines(text):
 
 
 def _page_size(data):
-    doc = pdfium.PdfDocument(data)
-    try:
-        return doc[0].get_size()
-    finally:
-        doc.close()
+    with _pdfium_turn:
+        doc = pdfium.PdfDocument(data)
+        try:
+            return doc[0].get_size()
+        finally:
+            doc.close()
 
 
 def _tokenise(picked):
@@ -165,6 +171,11 @@ def _word_edges(text, spans):
 
 
 def page_texts(data):
+    with _pdfium_turn:
+        return _page_texts(data)
+
+
+def _page_texts(data):
     doc = pdfium.PdfDocument(data)
     try:
         out = []
@@ -187,10 +198,15 @@ def page_count(data):
 
 
 def pages(data, first, last):
+    return picked(data, range(first, last + 1))
+
+
+def picked(data, numbers):
+    # a smaller PDF holding only these pages (counted from 1), in page order
     reader = PdfReader(io.BytesIO(data))
     w = PdfWriter()
-    for i in range(first - 1, last):
-        w.add_page(reader.pages[i])
+    for p in sorted(set(numbers)):
+        w.add_page(reader.pages[p - 1])
     out = io.BytesIO()
     w.write(out)
     return out.getvalue()

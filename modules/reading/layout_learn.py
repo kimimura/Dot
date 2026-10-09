@@ -7,8 +7,8 @@ import config
 from modules.reading.layout_places import (Unlearnable, doc_pages, field_rule, join_pieces, leftover_place,
                                            split_span, table_bands, value_spans)
 from modules.reading.layout_read import read_variant
-from modules.reading.layout_tokens import (apply_rule, join_tokens, line_middles, similar, split_lines, tidy_classes,
-                                           token_class, word_set)
+from modules.reading.layout_tokens import (apply_rule, join_tokens, line_middles, mask_line, mask_token, similar, split_lines,
+                                           tidy_classes, token_class, word_set)
 from modules.reading.verify import norm_text
 
 
@@ -58,6 +58,52 @@ def _place(r, toks, rcols):
     return where, tail, cut
 
 
+def _gaps(where, tail, toks):
+    # printed words in a row that belong to no column of the sheet (one the user dropped): kept as parts to skip, named by where they sit
+    spans = sorted([(s, e, c) for c, (s, e) in where.items()] + [(s, e, f"{c} spill") for c, (s, e) in tail.items()])
+    if not spans:
+        return {}
+    gaps, (first, _, name) = {}, spans[0]
+    a = first
+    while a > 0 and toks[a - 1][0] == toks[first][0]:
+        a -= 1
+    if a < first:
+        gaps[f"_before {name}"] = (a, first)
+    for (_, e1, c1), (s2, _, c2) in zip(spans, spans[1:]):
+        # words between two columns of the row, or on one line; never the lines before text that spills on after the row
+        if e1 < s2 and (toks[e1 - 1][0] == toks[s2][0] or not (c1.endswith(" spill") or c2.endswith(" spill"))):
+            gaps[f"_after {c1}"] = (e1, s2)
+    end, last = spans[-1][1], spans[-1][2]
+    b = end
+    while b < len(toks) and toks[b][0] == toks[end - 1][0]:
+        b += 1
+    if b > end:
+        gaps[f"_after {last}"] = (end, b)
+    return gaps
+
+
+def _skip_lines(placed, one_page):
+    # printed lines inside the rows that the confirmed sheet kept nothing from (e.g. "6 BOXES 5.00 4.21" under an item):
+    # their shape, numbers masked, is skipped on new files; a line of numbers alone is never learned, so a lost row can't hide as one
+    # the last row of each document runs into its footer, and a row across a page break holds the next page's header,
+    # so only rows on one page with another row after them teach lines to skip
+    last = {r.get("_doc", 0): i for i, (r, *_) in enumerate(placed)}
+    shapes = set()
+    for i, (r, toks, where, tail, _) in enumerate(placed):
+        if last[r.get("_doc", 0)] == i or id(r) not in one_page:
+            continue
+        kept = {toks[k][0] for s, e in list(where.values()) + list(tail.values()) for k in range(s, e)}
+        if not kept:
+            continue
+        by_line = {}
+        for L, t in toks:
+            by_line.setdefault(L, []).append(t)
+        for L, words in by_line.items():
+            if L not in kept and any(mask_token(t) != "#" for t in words):
+                shapes.add(mask_line(words))
+    return sorted(shapes)
+
+
 def _settle_bands(rows, lines, rcols, bands):
     # an item may open with a short value printed alone above the rest (a line number): it starts right after the item before
     last = []
@@ -105,7 +151,7 @@ def _alternatives(spec, rows):
     # optional columns side by side that never both hold a value in one row: only where they sit tells them apart
     groups, run = [], []
     for col in spec + [None]:
-        if col and col["optional"] and not col["var"]:
+        if col and col["optional"] and not col["var"] and not col.get("skip"):
             run.append(col)
             continue
         if len(run) > 1 and all(sum(bool(r.get(c["col"])) for c in run) <= 1 for r in rows):
@@ -166,7 +212,7 @@ def _learn_spots(spec, spot_rows, rows):
     # a column keeping one place between its neighbours keeps it, so a value printed under another column is never taken for it
     for k, col in enumerate(spec):
         before, after = _anchors(spec, k)
-        if "spot" in col or col["var"] or not before or not after or col["col"] in (before, after):
+        if "spot" in col or col["var"] or col.get("skip") or not before or not after or col["col"] in (before, after):
             continue
         spots = sorted(_between(spot_rows, col["col"], before, after))
         if len(spots) < 2:
@@ -188,7 +234,7 @@ def learn(table, texts):
     table = join_pieces(table)
     segs = doc_pages(table, texts)
 
-    placed, found, seg_lines, cut_of, spot_rows = [], Counter(), [], {}, []
+    placed, found, seg_lines, cut_of, spot_rows, skipped, one_page = [], Counter(), [], {}, [], {}, set()
     for rows, pages in segs:
         page_texts = [texts[p] for p in pages]
         lines, middles = split_lines(page_texts), line_middles(page_texts)
@@ -204,6 +250,8 @@ def learn(table, texts):
             cut_of[id(r)] = cut
             spot_rows.append({c: (toks[s][0], mids[s]) for c, (s, _) in where.items()})
             placed.append((r, toks, where, tail, line_len))
+            if lines[a][0] == lines[b - 1][0]:
+                one_page.add(id(r))
 
     all_rows = [r for r, *_ in placed]
     in_row, by_label = [], []
@@ -215,6 +263,12 @@ def learn(table, texts):
             by_label.append(c)
         else:
             raise Unlearnable(f'"{c}" couldn\'t be located in its rows')
+    # once it is known which columns sit in the rows, printed words between them that the sheet left out are parts to skip
+    for _, toks, where, tail, _ in placed:
+        gaps = _gaps({c: where[c] for c in where if c in in_row}, tail, toks)
+        where.update(gaps)
+        skipped.update(dict.fromkeys(gaps))
+    in_row += list(skipped)
 
     # the structure comes from the rows that agree; a few rows the model got wrong are left out
     def seq_of(where):
@@ -254,10 +308,15 @@ def learn(table, texts):
     spec = []
     for k, c in enumerate(order):
         counts = {where[c][1] - where[c][0] for _, _, where, _, _ in placed if c in where}
+        if not counts and c in skipped:
+            # a part to skip seen only in rows that were set aside isn't part of the layout
+            continue
         col = {"col": c, "optional": any(not r.get(c) for r in all_rows)}
+        if c in skipped:
+            col.update(optional=any(c not in where for _, _, where, _, _ in placed), skip=True)
         col["var"] = max(counts) > 4 or len(counts) > 3 or c in tails
         if col["var"]:
-            col["glue"] = _learn_glue(c, placed)
+            col["glue"] = c not in skipped and _learn_glue(c, placed)
             if c in tails:
                 col["tail"] = tidy_classes({"INT" if x.startswith("INT:") else x
                                      for _, toks, _, tail, _ in placed if c in tail for _, t in toks[tail[c][0]:tail[c][1]] for x in [token_class(t)]})
@@ -321,7 +380,7 @@ def learn(table, texts):
     first_line = bands0[0][0] if bands0 else 0
     header = [" ".join(lines0[L][1]) for L in range(max(0, first_line - 2), first_line)]
     variant = {"row": spec, "lead": len(lead), "lead_lines": lead_lines, "fields": fields, "header": header,
-               "row_cols": in_row, "split_by": split_by}
+               "row_cols": in_row, "split_by": split_by, "skip_lines": _skip_lines(placed, one_page)}
     got, why = read_variant(variant, texts)
     if got is None:
         raise Unlearnable(f"the confirmed sheet couldn't be read back ({why})")

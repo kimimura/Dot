@@ -3,7 +3,7 @@ RATE_MARKERS = ("429", "resource_exhausted", "quota", "rate limit")
 OVERLOAD_MARKERS = ("503", "unavailable", "overloaded", "high demand")
 
 # what the user sees; deliberately says nothing about what is behind the companion
-BUSY = "timed out"
+BUSY = "busy right now — try again later"
 DAILY = "daily limit reached — try again tomorrow"
 NO_MODEL = "no reading model is set up"
 GARBLED = "unreadable result"

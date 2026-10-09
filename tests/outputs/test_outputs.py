@@ -5,7 +5,7 @@ import pytest
 import config
 from conftest import wait_for
 from core import webhook
-from helpers import convert
+from helpers import convert, keep_in_library, teach_acme
 from modules.outputs import build
 
 COLUMNS = [{"name": "PO No.", "kind": "doc"}, {"name": "Date", "kind": "doc"}, {"name": "Printed on", "kind": "doc"},
@@ -39,25 +39,25 @@ def test_only_whole_dates_change_and_only_into_one_style(printed, order, want):
 
 
 def test_every_converted_file_keeps_its_output_and_an_unknown_one_says_so(client, fake_db, acme_pdf, acme2_pdf, orbit_pdf):
-    fake_db.add_profile("ACME", [("Invoice No", "doc"), ("Item", "row"), ("Qty", "row")], acme_pdf)
+    teach_acme(client, acme_pdf)
     known = convert(acme2_pdf)["id"]
-    unknown = convert(orbit_pdf, "orbit.pdf")["id"]
+    unknown = keep_in_library(client, orbit_pdf, "orbit.pdf")
     out = fake_db.outputs[(known, "current")]
     assert out["chain"] == "ACME" and out["orders"][0]["invoice_no"] == "INV-2026-0107"
-    assert out["orders"][0]["rows"] == [{"item": "A300", "qty": "3"}]
+    assert out["orders"][0]["rows"] == [{"item": "A300", "qty": "3", "price": "100.00"}]
     assert fake_db.outputs[(unknown, "current")]["chain"] == "Unidentified"
     assert fake_db.outputs[(unknown, "current")]["orders"][0]["po_number"] == "PO-77812"
 
 
 def test_an_edit_updates_the_current_output(client, fake_db, acme_pdf, acme2_pdf):
-    fake_db.add_profile("ACME", [("Invoice No", "doc"), ("Item", "row"), ("Qty", "row")], acme_pdf)
+    teach_acme(client, acme_pdf)
     did = convert(acme2_pdf)["id"]
     client.post(f"/api/docs/{did}/ops", json={"ops": [{"op": "set_cell", "row": 0, "col": "Qty", "value": "7"}]})
     assert fake_db.outputs[(did, "current")]["orders"][0]["rows"][0]["qty"] == "7"
 
 
 def test_what_was_sent_is_kept_as_it_was(client, fake_db, monkeypatch, acme_pdf, acme2_pdf):
-    fake_db.add_profile("ACME", [("Invoice No", "doc"), ("Item", "row"), ("Qty", "row")], acme_pdf)
+    teach_acme(client, acme_pdf)
     monkeypatch.setattr(config, "EMAIL_INTAKE_TOKEN", "t")
     monkeypatch.setattr(config, "EMAIL_ALERT_URL", "https://alerts.example/flow")
     monkeypatch.setattr(config, "EMAIL_POLL_SECONDS", 0.02)

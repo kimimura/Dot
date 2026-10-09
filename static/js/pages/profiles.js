@@ -1,4 +1,4 @@
-import { NAME, $, $$, view, esc, ago, el, ICON } from "../shared/dom.js";
+import { NAME, $, $$, view, esc, ago, el, fmtDate, ICON } from "../shared/dom.js";
 import { views } from "../shared/views.js";
 import { api, toast } from "../shared/api.js";
 import { loadSideProfiles, setCrumb } from "../shared/shell.js";
@@ -23,8 +23,8 @@ views.profiles = async function (pid) {
 
 function profileCard(p, open) {
   const card = el(`<div class="tpl-card ${open ? "" : "collapsed"}" data-pid="${p.id}">
-    <div class="tpl-head"><span class="tpl-toggle">${ICON.chev}</span><span class="tpl-name-label">${esc(p.name)}</span>
-      <span class="tpl-meta">${p.columns.length} col · used ${p.times_used}× · ${p.last_used_at ? ago(p.last_used_at) : "never used"}${p.reads_directly ? ' · <span title="Files of this format are read straight from their learned layout">reads directly</span>' : p.layout_problem ? ` · <span title="${esc(p.layout_problem)}">can't read directly yet</span>` : ""}</span>
+    <div class="tpl-head"><span class="tpl-toggle">${ICON.chev}</span><span class="tpl-name-label">${esc(p.name)}<span class="tpl-edited" title="When a file was last confirmed for it, or it was last saved here; on email, the format edited last wins a tie">last edited ${fmtDate(p.updated_at)}</span></span>
+      <span class="tpl-meta">${p.columns.length} col · used ${p.n_docs}×${p.reads_directly ? ' · <span title="Files of this format are read straight from their learned layout">reads directly</span>' : p.layout_problem ? ` · <span title="${esc(p.layout_problem)}">can't read directly yet</span>` : ""}</span>
       <span class="tpl-head-actions"><button class="btn small" data-a="rename">Rename</button><button class="btn small danger" data-a="delete">${ICON.trash}</button></span></div>
     <div class="panel tpl-body"><div class="tpl-loading empty-state">Loading…</div></div></div>`);
   const head = $(".tpl-head", card);
@@ -77,8 +77,7 @@ async function loadProfileBody(card, pid) {
     if (b.dataset.hint !== undefined) { hints.splice(+b.dataset.hint, 1); b.closest(".field-row").remove(); }
     if (b.dataset.a === "add") { const n = $('[data-new="name"]', body).value.trim(); if (!n) return; cols.push({ name: n, kind: $('[data-new="kind"]', body).value, hint: $('[data-new="hint"]', body).value.trim(), seen: 0 }); $('[data-new="name"]', body).value = ""; $('[data-new="hint"]', body).value = ""; drawCols(); }
     if (b.dataset.a === "reread") {
-      const taught = p.n_docs ? ` ${p.n_docs === 1 ? "This includes the file" : `This includes the ${p.n_docs} files`} ${p.name} learns from: ${p.n_docs === 1 ? "its sheet is" : "their sheets are"} replaced by a new read by the model (uses tokens).` : "";
-      if (!confirm(`Re-read every ${p.name} file with the saved format? Each file keeps its current sheet until the new one is ready, and each re-read can be undone from the file's Library page.${taught}`)) return;
+      if (!confirm(`Re-read every ${p.name} file with its current format? A file that doesn't fit it keeps its sheet, and each re-read can be undone from the file's Library page.`)) return;
       b.disabled = true;
       try {
         const r = await api("POST", `/api/profiles/${p.id}/reread`);

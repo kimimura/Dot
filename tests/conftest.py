@@ -104,32 +104,28 @@ class FakeDb:
             sub = self.submissions.get(d.get("submission_id")) or {}
             row["source"], row["sender"] = sub.get("source"), sub.get("sender")
             row["has_output"] = d["stage"] in ("confirmed", "converted", "rereading")
-            row["teaches"] = bool(d.get("profile_id")) and d["stage"] == "confirmed"
-            row["teachers"] = self.teachers(conn, d.get("profile_id"))
             out.append(row)
         return out[:limit]
-
-    def teachers(self, conn, pid):
-        return sum(1 for d in self.docs.values() if pid and d.get("profile_id") == pid and d["stage"] == "confirmed")
 
     def add_profile(self, name, columns, pdf_bytes):
         info = pdftext.inspect(pdf_bytes)
         p = {"id": db.new_id(), "name": name, "columns": [{"name": c, "kind": k, "seen": 1} for c, k in columns],
              "fingerprint": {"tokens": {w: 1 for w in info.tokens}, "n_docs": 1, "structural": info.structural},
-             "hints": [], "examples": [], "signature": {}, "created_at": db.now(), "updated_at": db.now(),
-             "times_used": 1, "last_used_at": None}
+             "hints": [], "examples": [], "signature": {}, "created_at": db.now(), "updated_at": db.now()}
         self.profiles[p["id"]] = p
         return p
 
     def create_profile(self, conn, name, columns=None, signature=None):
         p = {"id": db.new_id(), "name": name.strip(), "columns": columns or [],
              "fingerprint": {"tokens": {}, "n_docs": 0, "structural": {}}, "hints": [], "examples": [], "signature": signature or {},
-             "created_at": db.now(), "updated_at": db.now(), "times_used": 0, "last_used_at": None, "layout": None}
+             "created_at": db.now(), "updated_at": db.now(), "layout": None}
         self.profiles[p["id"]] = p
         return copy.deepcopy(p)
 
-    def confirmed_ids(self, conn, pid, exclude):
-        return [d["id"] for d in self.docs.values() if d.get("profile_id") == pid and d["stage"] == "confirmed" and d["id"] != exclude]
+    def save_profile(self, conn, p, edited=False):
+        if edited:
+            p["updated_at"] = db.now()
+        self.profiles[p["id"]] = copy.deepcopy(p)
 
     def install(self, mp):
         mp.setattr(db, "connect", lambda tries=1: FakeConn())
@@ -143,8 +139,6 @@ class FakeDb:
         mp.setattr(documents, "delete", lambda conn, did: (self.docs.pop(did, None), self.pdfs.pop(did, None)))
         mp.setattr(documents, "list_submission", self.list_submission)
         mp.setattr(documents, "list_docs", self.list_docs)
-        mp.setattr(documents, "confirmed_ids", self.confirmed_ids)
-        mp.setattr(documents, "teachers", self.teachers)
         mp.setattr(documents, "pending", lambda conn: [d["id"] for d in self.docs.values() if d["stage"] in ("queued", "converting", "rereading")])
         mp.setattr(documents, "rereadable", lambda conn, pid: [d["id"] for d in sorted(self.docs.values(), key=lambda d: d["uploaded_at"])
                                                              if d.get("profile_id") == pid and d["stage"] in ("confirmed", "converted")])
@@ -155,7 +149,7 @@ class FakeDb:
         mp.setattr(profiles, "get", lambda conn, pid: copy.deepcopy(self.profiles.get(pid)))
         mp.setattr(profiles, "by_name", lambda conn, name: copy.deepcopy(
             next((p for p in self.profiles.values() if p["name"].lower() == str(name).lower()), None)))
-        mp.setattr(profiles, "save", lambda conn, p: self.profiles.__setitem__(p["id"], copy.deepcopy(p)))
+        mp.setattr(profiles, "save", self.save_profile)
         mp.setattr(profiles, "create", self.create_profile)
         mp.setattr(profiles, "delete", lambda conn, pid: self.profiles.pop(pid, None))
         mp.setattr(submissions, "create", self.add_submission)
@@ -176,11 +170,12 @@ def fake_db(monkeypatch):
     yield FakeDb().install(monkeypatch)
     # background work a test left behind must not outlive its fake database and reach the real one
     left = []
-    while True:
-        try:
-            left.append(jobs._q.get_nowait()[0])
-        except queue.Empty:
-            break
+    for lane, line in list(jobs._lanes.items()):
+        while True:
+            try:
+                left.append((lane, line["q"].get_nowait()[0]))
+            except queue.Empty:
+                break
     with jobs._guard:
         jobs._queued.difference_update(left)
     end = time.time() + 30

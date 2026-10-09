@@ -1,6 +1,5 @@
 import config
 from core import db
-from modules.documents import repository as documents
 from modules.profiles import hints, repository
 
 
@@ -15,10 +14,10 @@ def learn(conn, p, doc, table, doc_hints, tokens, structural, signature):
         for t in set(tokens or []):
             toks[t] = toks.get(t, 0) + 1
         fp["doc_ids"] = (fp["doc_ids"] + [doc["id"]])[-config.PROFILE_MAX_FP_DOCS:]
-        fp["n_docs"] = len(fp["doc_ids"])
+        # every confirmed file is counted, as every one added to the word counts; the id list only keeps the latest
+        fp["n_docs"] = int(fp.get("n_docs") or 0) + 1
         if len(toks) > config.PROFILE_MAX_FP_TOKENS:
             fp["tokens"] = dict(sorted(toks.items(), key=lambda kv: -kv[1])[:config.PROFILE_MAX_FP_TOKENS])
-        p["times_used"] = int(p.get("times_used") or 0) + 1
     fp["structural"] = structural or fp.get("structural", {})
     p["fingerprint"] = fp
 
@@ -30,8 +29,7 @@ def learn(conn, p, doc, table, doc_hints, tokens, structural, signature):
     p["examples"] = ([ex] + [e for e in p["examples"] if e.get("doc_id") != doc["id"]])[:config.PROFILE_MAX_EXAMPLES]
     if signature and not p.get("signature"):
         p["signature"] = signature
-    p["last_used_at"] = db.now()
-    repository.save(conn, p)
+    repository.save(conn, p, edited=True)
     return p
 
 
@@ -63,31 +61,3 @@ def merge_columns(existing, confirmed, hints, bump=True):
         if k not in dropped:
             out.append(c)
     return out
-
-
-def rebuild(conn, p, docs):
-    toks = {}
-    for d in docs:
-        for t in set(d.get("tokens") or []):
-            toks[t] = toks.get(t, 0) + 1
-    fp = p["fingerprint"] or {}
-    fp["tokens"] = dict(sorted(toks.items(), key=lambda kv: -kv[1])[:config.PROFILE_MAX_FP_TOKENS])
-    fp["doc_ids"] = [d["id"] for d in docs]
-    fp["n_docs"] = len(docs)
-    p["fingerprint"] = fp
-    p["times_used"] = len(docs)
-    live = {d["id"] for d in docs}
-    p["examples"] = [e for e in p.get("examples") or [] if e.get("doc_id") in live]
-    n = max(len(docs), 1)
-    for c in p["columns"]:
-        c["seen"] = min(int(c.get("seen", 0) or 0), n)
-    repository.save(conn, p)
-    return p
-
-
-def forget(conn, pid, doc_id):
-    p = repository.get(conn, pid)
-    if not p or doc_id not in (p["fingerprint"] or {}).get("doc_ids", []):
-        return None
-    docs = [d for d in (documents.get(conn, i) for i in documents.confirmed_ids(conn, pid, doc_id)) if d]
-    return rebuild(conn, p, docs)

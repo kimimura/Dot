@@ -23,9 +23,10 @@ def counts(conn, week_days):
 
 
 def top_formats(conn, limit):
-    return [dict(r) for r in conn.execute(
-        f"SELECT TOP {int(limit)} p.name, p.times_used AS n, p.last_used_at FROM profiles p ORDER BY p.times_used DESC, p.name"
-    ).fetchall()]
+    # how many files each format was confirmed with is kept in its fingerprint
+    rows = [{"name": r["name"], "n": int(db.loads(r["fingerprint_json"], {}).get("n_docs") or 0)}
+            for r in conn.execute("SELECT name, fingerprint_json FROM profiles").fetchall()]
+    return sorted(rows, key=lambda r: (-r["n"], r["name"]))[:int(limit)]
 
 
 def uploads_by_day(conn, days):

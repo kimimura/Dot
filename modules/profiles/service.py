@@ -6,7 +6,7 @@ from core.errors import Refused
 from modules.documents import repository as documents
 from modules.profiles import matching, repository as profiles
 
-VIEW_KEYS = ("id", "name", "created_at", "updated_at", "columns", "hints", "signature", "times_used", "last_used_at")
+VIEW_KEYS = ("id", "name", "created_at", "updated_at", "columns", "hints", "signature")
 
 
 def view(conn, p, with_docs=False):
@@ -89,7 +89,8 @@ def update(pid, body):
         p["columns"] = _clean_columns(body["columns"])
     if "hints" in body and isinstance(body["hints"], list):
         p["hints"] = _clean_rules(body["hints"])
-    profiles.save(conn, p)
+    # saving a format here is an edit like confirming a file for it: it becomes the format edited last
+    profiles.save(conn, p, edited=True)
     conn.commit()
     v = view(conn, profiles.get(conn, pid), with_docs=True)
     conn.close()

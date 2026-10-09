@@ -44,16 +44,17 @@ MIGRATIONS = ROOT / "migration"
 # ── model ────────────────────────────────────────────────────────────────────
 AI_PROVIDER = env("LLM_PROVIDER")
 AI_KEY = env("LLM_API_KEY", "GEMINI_API_KEY", "API_KEY")
-# tried in this order; when one is used up the next takes over
+# tried in this order; when one is used up the next takes over. Chat edits use AI_MODELS; reading PDFs uses AI_READ_MODELS when set
 AI_MODELS = [m.strip() for m in env("LLM_MODELS", "LLM_MODEL", "GEMINI_MODEL").split(",") if m.strip()]
-AI_DAILY_RESET_UTC_HOUR = 8
-AI_OVERLOAD_REST = 60
+AI_READ_MODELS = [m.strip() for m in env("LLM_READ_MODELS").split(",") if m.strip()] or AI_MODELS
+# only used when the service doesn't say how long to wait; its daily limits start over at midnight UTC (8 am in Malaysia)
+AI_DAILY_RESET_UTC_HOUR = 0
+# a busy model is tried again after each of these waits (seconds) before giving up; only a used-up model hands over
+AI_BUSY_WAITS = (120,)
+AI_SAID_MAX_CHARS = 400
 AI_RPM = int(env("LLM_RPM", default="15"))
 AI_TEMPERATURE = 0.1
 AI_CHAT_MAX_REPLY_TOKENS = 16384
-AI_MAX_RETRIES = 5
-AI_MAX_WAIT = 60
-AI_WAIT_BUDGET = 120
 
 # ── PDFs ─────────────────────────────────────────────────────────────────────
 PDF_MAX_BYTES = 20 * 1024 * 1024
@@ -63,7 +64,10 @@ PDF_WORD_GAP = 0.06
 
 # ── reading with the model ───────────────────────────────────────────────────
 EXTRACT_CHUNK_PAGES = 100
+# a piece's answer must fit what the model can write back; 30K characters of a dense PO is about 230 rows
 EXTRACT_CHUNK_CHARS = 30000
+# share of rows that must agree before a printed column counts as the source of a sheet column
+DERIVE_MATCH = 0.9
 EXTRACT_SCAN_CHUNK_PAGES = 15
 EXTRACT_MIN_SPLIT_PAGES = 3
 EXTRACT_COVERAGE_OK = 1.0
@@ -118,6 +122,13 @@ PROFILE_DOCS_SHOWN = 20
 UNDO_DEPTH = 10
 CHAT_MAX_CHARS = 2000
 CHAT_MAX_UNDO_STEPS = 10
+# the chat model never types out more values than this; a column's values come from reading the PDF
+CHAT_MAX_TYPED_VALUES = 20
+# what the chat model is shown: a few sample rows, the rows a message names or quotes, the rows marked wrong, and their pages
+CHAT_SAMPLE_ROWS = 15
+CHAT_QUOTED_ROWS = 10
+CHAT_FLAGGED_ROWS = 30
+CHAT_MAX_PAGES = 6
 REREAD_MIN_MATCHED = 0.9
 REREAD_LOOKAHEAD = 8
 REREAD_SIMILAR = 0.85
@@ -148,5 +159,5 @@ EMAIL_FILE_NAME = "{format}_SalesOrder_{stamp}"
 EMAIL_SUBJECT = "{n} PDF{s} Received"
 EMAIL_FILE_LINE = "{rows} line{s} · {file}"
 EMAIL_UNIDENTIFIED = "Unidentified"
-EMAIL_UNREADABLE = "Could not be read"
+EMAIL_UNREADABLE = "Not read, teach it in Profile Builder"
 EMAIL_UNFINISHED = "Still processing"

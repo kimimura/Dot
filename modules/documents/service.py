@@ -7,7 +7,6 @@ from flask import abort
 from core import db, sheets
 from modules.documents import repository as documents, view, work
 from modules.outputs import service as outputs
-from modules.profiles import learning
 
 MIMETYPES = {"csv": "text/csv", "json": "application/json", "pdf": "application/pdf"}
 
@@ -29,9 +28,8 @@ def envelope(doc_id):
 
 def delete(doc_id):
     conn = db.connect()
-    d = work.load_or_404(conn, doc_id)
-    if d.get("profile_id"):
-        learning.forget(conn, d["profile_id"], doc_id)
+    # a file is only evidence: its format keeps everything it learned, and is forgotten only by deleting the format
+    work.load_or_404(conn, doc_id)
     documents.delete(conn, doc_id)
     conn.commit()
     conn.close()

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -73,8 +73,14 @@ def reader_with(models, names=("model",)):
     return reader
 
 
-PER_DAY = "429 RESOURCE_EXHAUSTED: quota exceeded for metric generate_requests_per_model_per_day, limit PerDay"
-PER_MINUTE = "429 RESOURCE_EXHAUSTED: quota exceeded for metric generate_requests_per_model, limit PerMinute. Please retry in 30s."
+def google(code, status, message, quota=""):
+    # an error laid out the way the service's library prints one
+    details = f", 'details': [{{'violations': [{{'quotaId': '{quota}'}}]}}]" if quota else ""
+    return f"{code} {status}. {{'error': {{'code': {code}, 'message': {message!r}, 'status': '{status}'{details}}}}}"
+
+
+PER_DAY = google(429, "RESOURCE_EXHAUSTED", "You exceeded your current quota.", "GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+PER_MINUTE = google(429, "RESOURCE_EXHAUSTED", "You exceeded your current quota. Please retry in 30s.", "GenerateRequestsPerMinutePerProjectPerModel-FreeTier")
 
 
 class Rationed:
@@ -102,41 +108,60 @@ def test_a_model_used_up_for_the_day_hands_over_to_the_next_and_rests(quiet):
     reader = reader_with(models, ["m1", "m2", "m3"])
     assert reader.complete(b"%PDF", "hello") == {"by": "m2"}
     assert reader.complete(b"%PDF", "hello again") == {"by": "m2"}
-    assert models.asked == ["m1", "m2", "m2"] and quiet == ["m1 used up for today, switching to m2"]
+    assert models.asked == ["m1", "m2", "m2"]
+    assert quiet == ["m1: 429 RESOURCE_EXHAUSTED: You exceeded your current quota. — switching to m2"]
 
 
-def test_a_model_busy_for_the_minute_hands_over_and_is_tried_again_once_it_has_rested(quiet, monkeypatch):
-    clock = [1000.0]
-    monkeypatch.setattr(gemini.time, "monotonic", lambda: clock[0])
-    models = Rationed({"m1": PER_MINUTE})
-    reader = reader_with(models, ["m1", "m2"])
-    assert reader.complete(b"%PDF", "hello") == {"by": "m2"} and quiet == ["m1 busy for now, switching to m2"]
-    clock[0] += 31
-    models.refusals = {}
-    assert reader.complete(b"%PDF", "hello") == {"by": "m1"}
+OVERLOADED = google(503, "UNAVAILABLE", "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.")
 
 
-def test_an_overloaded_model_hands_over_instead_of_retrying_until_it_times_out(quiet):
-    overloaded = "503 UNAVAILABLE. This model is currently experiencing high demand. Please try again later."
-    models = Rationed({"m1": overloaded})
-    assert reader_with(models, ["m1", "m2"]).complete(b"%PDF", "hello") == {"by": "m2"}
-    assert models.asked == ["m1", "m2"] and quiet == ["m1 overloaded, switching to m2"]
+@pytest.fixture
+def slept(monkeypatch):
+    waits = []
+    monkeypatch.setattr(gemini.time, "sleep", waits.append)
+    return waits
 
 
-def test_when_every_model_stays_overloaded_it_stops_going_round_and_says_timed_out(quiet, monkeypatch):
-    clock = [0.0]
-    monkeypatch.setattr(gemini.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(gemini.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
-    overloaded = "503 UNAVAILABLE. This model is currently experiencing high demand."
+class Recovers(Rationed):
+    # refuses the first few asks, then answers
+    def __init__(self, refusal, times):
+        super().__init__({})
+        self.refusal, self.times = refusal, times
 
-    class Slow(Rationed):
-        def generate_content(self, model, contents, config):
-            clock[0] += 20
-            return super().generate_content(model, contents, config)
-    models = Slow({"m1": overloaded, "m2": overloaded})
-    with pytest.raises(errors.LLMError, match="timed out"):
+    def generate_content(self, model, contents, config):
+        if len(self.asked) < self.times:
+            self.asked.append(model)
+            raise Exception(self.refusal)
+        return super().generate_content(model, contents, config)
+
+
+@pytest.mark.parametrize("refusal, said", [
+    (OVERLOADED, "503 UNAVAILABLE: This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later."),
+    (PER_MINUTE, "429 RESOURCE_EXHAUSTED: You exceeded your current quota. Please retry in 30s."),
+    (google(500, "INTERNAL", "An internal error has occurred."), "500 INTERNAL: An internal error has occurred.")])
+def test_a_busy_model_is_waited_for_instead_of_handing_over_and_its_own_words_are_shown(quiet, slept, refusal, said):
+    models = Recovers(refusal, 1)
+    assert reader_with(models, ["m1", "m2"]).complete(b"%PDF", "hello") == {"by": "m1"}
+    assert models.asked == ["m1", "m1"] and slept == [120] and quiet == [f"m1: {said} — trying again in 2 min"]
+
+
+def test_a_model_still_busy_on_the_second_try_is_given_up_on(quiet, slept):
+    models = Rationed({"m1": OVERLOADED})
+    with pytest.raises(errors.LLMError, match="busy right now"):
         reader_with(models, ["m1", "m2"]).complete(b"%PDF", "hello")
-    assert clock[0] <= config.AI_WAIT_BUDGET + 60
+    assert models.asked == ["m1", "m1"] and slept == [120]
+    assert quiet[-1].startswith("m1: 503 UNAVAILABLE: This model is currently") and quiet[-1].endswith("— tried 2 times, giving up")
+
+
+def test_a_longer_wait_asked_for_by_the_limit_is_kept(quiet, slept):
+    reader_with(Recovers(google(429, "RESOURCE_EXHAUSTED", "Please retry in 300s."), 1), ["m1"]).complete(b"%PDF", "hello")
+    assert slept == [300] and quiet == ["m1: 429 RESOURCE_EXHAUSTED: Please retry in 300s. — trying again in 5 min"]
+
+
+def test_an_error_not_laid_out_as_usual_is_still_shown_whole(quiet):
+    with pytest.raises(errors.LLMError):
+        reader_with(Rationed({"m1": "Connection reset by peer"}), ["m1"]).complete(b"%PDF", "hello")
+    assert quiet == ["m1: Connection reset by peer — stopped"]
 
 
 def test_the_library_does_not_retry_quietly_on_its_own():
@@ -148,7 +173,7 @@ def test_when_every_model_is_used_up_for_the_day_the_error_is_plain(quiet):
     reader = reader_with(Rationed({"m1": PER_DAY, "m2": PER_DAY}), ["m1", "m2"])
     with pytest.raises(errors.LLMError, match="daily limit reached"):
         reader.complete(b"%PDF", "hello")
-    assert quiet[-1] == "m2 used up for today, no other model free"
+    assert quiet[-1] == "m2: 429 RESOURCE_EXHAUSTED: You exceeded your current quota. — no other model left"
 
 
 def test_no_model_set_says_so_and_there_is_no_built_in_default(monkeypatch):
@@ -161,11 +186,16 @@ def test_no_model_set_says_so_and_there_is_no_built_in_default(monkeypatch):
 
 
 def test_the_daily_rest_lasts_until_the_next_reset():
-    hour = config.AI_DAILY_RESET_UTC_HOUR
-    before = datetime(2026, 10, 7, hour - 1, 30, tzinfo=timezone.utc)
-    after = datetime(2026, 10, 7, hour, 30, tzinfo=timezone.utc)
-    assert gemini.seconds_to_daily_reset(before) == 30 * 60
-    assert gemini.seconds_to_daily_reset(after) == 23.5 * 3600
+    reset = datetime(2026, 10, 7, config.AI_DAILY_RESET_UTC_HOUR, 0, tzinfo=timezone.utc)
+    assert gemini.seconds_to_daily_reset(reset - timedelta(minutes=30)) == 30 * 60
+    assert gemini.seconds_to_daily_reset(reset + timedelta(minutes=30)) == 23.5 * 3600
+
+
+def test_a_used_up_model_rests_as_long_as_the_service_says(quiet):
+    models = Rationed({"m1": PER_DAY.replace("You exceeded your current quota.", "You exceeded your current quota. Please retry in 22h8m29.2s.")})
+    reader = reader_with(models, ["m1", "m2"])
+    reader.complete(b"%PDF", "hello")
+    assert 22 * 3600 < reader.resting["m1"] - gemini.time.monotonic() <= 22 * 3600 + 8 * 60 + 30
 
 
 def test_a_runaway_chat_reply_is_stopped_and_says_it_was_cut_off(monkeypatch):
@@ -189,3 +219,20 @@ def test_tool_calling_is_always_switched_off(monkeypatch):
         models = Models('{"documents": []}')
         reader_with(models).complete(b"%PDF", "hello", kind=kind)
         assert models.tool_calling_off is True
+
+
+def test_reading_goes_to_the_reading_models_and_chat_to_the_chat_models(quiet):
+    models = Rationed({})
+    reader = GeminiAdapter("key", ["flash"], ["lite"])
+    reader.client = SimpleNamespace(models=models)
+    assert reader.complete(b"%PDF", "read it") == {"by": "lite"}
+    assert reader.complete(b"%PDF", "rename a column", kind="chat") == {"by": "flash"}
+    assert models.asked == ["lite", "flash"]
+
+
+def test_without_reading_models_set_everything_uses_the_one_list(quiet):
+    models = Rationed({})
+    reader = GeminiAdapter("key", ["flash"])
+    reader.client = SimpleNamespace(models=models)
+    reader.complete(b"%PDF", "read it")
+    assert models.asked == ["flash"]

@@ -74,7 +74,7 @@ export async function loadSideProfiles() {
     const box = $("#side-profiles");
     if (!profiles.length) { box.innerHTML = '<div class="side-label">Formats</div><div class="co-item dim"><span class="name">Nothing learned yet</span></div>'; return; }
     box.innerHTML = '<div class="co-group"><button class="co-group-head" type="button"><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>Formats<span class="rt">' + profiles.length + '</span></button>' +
-      profiles.map(p => `<a class="co-item" href="#/profiles/${p.id}"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="count">${p.times_used}</span></a>`).join("") + "</div>";
+      profiles.map(p => `<a class="co-item" href="#/profiles/${p.id}"><span class="dot"></span><span class="name">${esc(p.name)}</span><span class="count">${p.n_docs}</span></a>`).join("") + "</div>";
     $(".co-group-head", box).addEventListener("click", e => e.currentTarget.parentElement.classList.toggle("collapsed"));
   } catch (e) {}
 }

@@ -6,8 +6,8 @@ import traceback
 _active = set()
 _queued = set()
 _guard = threading.Lock()
-_q = queue.Queue()
-_worker = {"thread": None}
+# each lane works through its own line one job at a time, so slow jobs in one lane never hold up another
+_lanes = {}
 progress = {}
 
 
@@ -38,28 +38,30 @@ def start(key, fn):
 
 def queued(key):
     with _guard:
-        return key in _queued
+        return any(k == key for _, k in _queued)
 
 
-def enqueue(key, fn):
+def enqueue(key, fn, lane="convert"):
     with _guard:
-        if key in _queued:
+        if (lane, key) in _queued:
             return False
-        _queued.add(key)
-        if not (_worker["thread"] and _worker["thread"].is_alive()):
-            _worker["thread"] = threading.Thread(target=_drain, daemon=True, name="convert-queue")
-            _worker["thread"].start()
-    _q.put((key, contextvars.copy_context(), fn))
+        _queued.add((lane, key))
+        line = _lanes.setdefault(lane, {"q": queue.Queue(), "thread": None})
+        if not (line["thread"] and line["thread"].is_alive()):
+            line["thread"] = threading.Thread(target=_drain, args=(lane,), daemon=True, name=f"{lane}-queue")
+            line["thread"].start()
+    line["q"].put((key, contextvars.copy_context(), fn))
     return True
 
 
-def _drain():
+def _drain(lane):
+    q = _lanes[lane]["q"]
     while True:
-        key, ctx, fn = _q.get()
+        key, ctx, fn = q.get()
         try:
             ctx.run(fn)
         except Exception:
             traceback.print_exc()
         finally:
             with _guard:
-                _queued.discard(key)
+                _queued.discard((lane, key))

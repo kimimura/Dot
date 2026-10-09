@@ -1,7 +1,6 @@
 import config
 from core import jobs
 from modules.companion import dialogue
-from modules.documents import repository as documents
 from modules.outputs import service as outputs
 from modules.profiles import repository as profiles
 from modules.submissions import repository as submissions
@@ -66,7 +65,6 @@ def envelope(conn, d, changes=None):
             "n_pages": d["n_pages"], "uploaded_at": d["uploaded_at"], "confirmed_at": d.get("confirmed_at"),
             "has_text_layer": d["has_text_layer"], "profile_id": d.get("profile_id"),
             "profile_name": prof["name"] if prof else None, "duplicate_of": d.get("duplicate_of"),
-            "teaches": bool(prof) and d["stage"] == "confirmed", "teachers": documents.teachers(conn, prof["id"]) if prof else 0,
             "source": sub["source"] if sub else None, "sender": sub["sender"] if sub else None,
             "sender_column": config.OUTPUT_SENDER_COLUMN,
             "has_output": has_output,

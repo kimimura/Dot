@@ -103,6 +103,14 @@ class Conn:
             pass
 
 
+LINK_LOST = ("08S01", "08001", "08003", "08004", "communication link failure")
+
+
+def lost(e):
+    # the connection to the database dropped (network or VPN), so the work is still good and only needs a fresh connection to save
+    return isinstance(e, pyodbc.Error) and any(k in str(e).lower() for k in (x.lower() for x in LINK_LOST))
+
+
 def connect(tries=1):
     last = None
     for n in range(tries):

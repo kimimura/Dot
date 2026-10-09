@@ -9,6 +9,9 @@ _now, _guard = {}, threading.Lock()
 def track(app):
     @app.before_request
     def started():
+        # page files (styles, scripts, the companion) are not work worth reporting
+        if request.path.startswith("/static/"):
+            return
         with _guard:
             _now[threading.get_ident()] = (request.method, request.full_path.rstrip("?"), time.monotonic())
 

@@ -1,5 +1,5 @@
 import config
-from core import pdftext
+from core import activity, pdftext
 from core.ai.errors import Truncated
 from modules.reading import doc_groups
 from modules.reading.parse import flatten, validate
@@ -52,15 +52,17 @@ def _halves(a, b):
     return [(a, m), (m + 1, b)]
 
 
-def run(llm, pdf, profile=None, hints=None, instruction=None, progress=None, texts=None):
+def run(llm, pdf, profile=None, hints=None, instruction=None, progress=None, texts=None, name=""):
     texts = texts if texts is not None else pdftext.page_texts(pdf)
     n = len(texts)
     queue = plan_chunks(texts)
     whole = queue == [(1, n)]
     norm_pages = None if whole else [norm_text(t) for t in texts]
     table = sig = template = None
-    extra, done = {}, 0
+    extra, done, sent = {}, 0, 0
     budget = config.EXTRACT_MAX_EXTRA_READS * len(queue)
+    # every request is said in the terminal, so a file asked about again and again is seen as it happens
+    say = lambda text: activity.note(f"{name + ': ' if name else ''}{text}")
     while queue:
         a, b = queue.pop(0)
         if progress and not whole:
@@ -69,11 +71,14 @@ def run(llm, pdf, profile=None, hints=None, instruction=None, progress=None, tex
         prompt = build_prompt(template or profile, hints, instruction, fresh=profile is None)
         if (a, b) != (1, n):
             prompt += _chunk_note(a, b, n)
+        sent += 1
         try:
             parsed = validate(llm.complete(part, prompt, kind="extract"))
         except Truncated:
             if b - a + 1 <= config.EXTRACT_MIN_SPLIT_PAGES:
+                say(f"request {sent}, pages {a}-{b}: answer cut off, too few pages to split")
                 raise
+            say(f"request {sent}, pages {a}-{b}: answer cut off, asking again in two halves")
             queue[:0] = _halves(a, b)
             continue
         t = flatten(parsed)
@@ -81,8 +86,10 @@ def run(llm, pdf, profile=None, hints=None, instruction=None, progress=None, tex
             t = _conform(t, template or profile)
         if not whole and budget > 0 and b - a + 1 > config.EXTRACT_MIN_SPLIT_PAGES and coverage(t, norm_pages, a, b) < config.EXTRACT_COVERAGE_OK:
             budget -= 1
+            say(f"request {sent}, pages {a}-{b}: {len(t['rows'])} rows, but some pages came back empty, asking again in two halves")
             queue[:0] = _halves(a, b)
             continue
+        say(f"request {sent}, pages {a}-{b} of {n}: {len(t['rows'])} rows")
         if table is None:
             table, sig = t, parsed["signature"]
             if not profile and not whole:

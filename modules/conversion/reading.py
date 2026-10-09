@@ -37,9 +37,10 @@ def read_direct(conn, d, prof, texts):
     return None, None, note
 
 
-def read_with_model(llm, d, pdf, prof, texts):
-    table, sig, _ = extract.run(llm, pdf, prof, texts=texts,
-                                progress=lambda done, n: jobs.progress.__setitem__(d["id"], {"done": done, "of": n}))
-    if prof:
+def model_read(llm, d, pdf, prof, texts, hints=None, instruction=None, keep_new=False):
+    # only Profile Builder reads with a model: a new format as printed, a known one in its own columns and rules
+    progress = lambda done, n: jobs.progress.__setitem__(d["id"], {"done": done, "of": n})
+    table, sig, extra = extract.run(llm, pdf, prof, hints, instruction, texts=texts, progress=progress, name=d["filename"])
+    if prof and not keep_new:
         table = only_format_columns(table, prof)
-    return table, verify.verify(table, "\n\n".join(texts), d["has_text_layer"]), sig
+    return table, sig, extra

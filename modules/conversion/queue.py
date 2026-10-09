@@ -1,7 +1,6 @@
 import logging
 
-from core import activity, ai, db, jobs, locks
-from core.ai.errors import LLMError
+from core import activity, db, jobs, locks
 from modules.conversion import convert, reread
 from modules.documents import repository as documents
 from modules.outputs import service as outputs
@@ -15,17 +14,17 @@ def enqueue(did):
 
 
 def run(did):
+    # emailed files and re-reads use only what each format has learned, so every file takes seconds and never waits on a model
     try:
         lk = locks.take(did)
     except locks.Busy:
         return
-    llm = ai.get_llm()
     try:
         conn = db.connect(tries=3)
         try:
             d = documents.get(conn, did)
             if d and d["stage"] == "rereading":
-                _reread(conn, llm, d)
+                _reread(conn, d)
             elif not d or d["stage"] not in CONVERTING:
                 return
             else:
@@ -34,16 +33,18 @@ def run(did):
                 conn.commit()
                 activity.note(f"Reading {d['filename']}")
                 try:
-                    convert.convert(conn, llm, d, documents.load_pdf(conn, did))
-                except LLMError as e:
-                    d["stage"], d["error"] = "failed", str(e)
+                    convert.convert(conn, d, documents.load_pdf(conn, did))
                 except Exception:
                     log.exception("converting %s failed", did)
                     d["stage"], d["error"] = "failed", "stopped unexpectedly"
-                if d["stage"] == "failed":
                     activity.note(f"Failed: {d['filename']}: {d['error']}")
                 # a layout the format learned while reading this file is kept, whatever became of the file
-                conn.commit()
+                try:
+                    conn.commit()
+                except Exception as e:
+                    if not db.lost(e):
+                        raise
+                    activity.note(f"the database connection dropped while reading {d['filename']}; saving it on a new one")
         finally:
             conn.close()
         conn = db.connect(tries=4)
@@ -58,11 +59,9 @@ def run(did):
         lk.release()
 
 
-def _reread(conn, llm, d):
+def _reread(conn, d):
     try:
-        reread.run(conn, llm, d, documents.load_pdf(conn, d["id"]))
-    except LLMError as e:
-        d["reread_error"] = str(e)
+        reread.run(conn, d, documents.load_pdf(conn, d["id"]))
     except Exception:
         log.exception("re-reading %s failed", d["id"])
         d["reread_error"] = "stopped unexpectedly"

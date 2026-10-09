@@ -10,7 +10,6 @@ def _row_to_profile(r):
         "hints": db.loads(r["hints_json"], []),
         "examples": db.loads(r["examples_json"], []),
         "signature": db.loads(r["signature_json"], {}),
-        "times_used": r["times_used"], "last_used_at": r["last_used_at"],
         "layout": db.loads(r.get("layout_json"), None),
     }
 
@@ -42,13 +41,15 @@ def create(conn, name, columns=None, signature=None):
     return get(conn, pid)
 
 
-def save(conn, p):
+def save(conn, p, edited=False):
+    # updated_at is when the user last edited the format; Dot's own saves (a layout learned while reading) leave it alone
+    if edited:
+        p["updated_at"] = db.now()
     conn.execute(
         "UPDATE profiles SET name=?, updated_at=?, columns_json=?, fingerprint_json=?, hints_json=?,"
-        " examples_json=?, signature_json=?, times_used=?, last_used_at=?, layout_json=? WHERE id=?",
-        (p["name"], db.now(), db.dumps(p["columns"]), db.dumps(p["fingerprint"]), db.dumps(p["hints"]),
-         db.dumps(p["examples"]), db.dumps(p["signature"]), p["times_used"], p["last_used_at"],
-         db.dumps(p.get("layout")), p["id"]),
+        " examples_json=?, signature_json=?, layout_json=? WHERE id=?",
+        (p["name"], p["updated_at"], db.dumps(p["columns"]), db.dumps(p["fingerprint"]), db.dumps(p["hints"]),
+         db.dumps(p["examples"]), db.dumps(p["signature"]), db.dumps(p.get("layout")), p["id"]),
     )
 
 

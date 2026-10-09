@@ -25,9 +25,12 @@ def run(doc_id, fn):
             result = fn(conn, d)
             d, changes = result if isinstance(result, tuple) else (result, [])
             try:
+                documents.save(conn, d)
                 outputs.refresh(conn, d)
                 conn.commit()
-            except Exception:
+            except Exception as e:
+                if not db.lost(e):
+                    raise
                 conn.close()
                 conn = db.connect(tries=4)
                 documents.save(conn, d)

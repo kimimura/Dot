@@ -13,24 +13,22 @@ def doc_for(pdf):
 def test_another_pdf_from_the_same_supplier_is_recognised(fake_db, acme_pdf, acme2_pdf, orbit_pdf):
     acme = fake_db.add_profile("ACME", ACME_COLS, acme_pdf)
     fake_db.add_profile("ORBIT", [("PO Number", "doc")], orbit_pdf)
-    assert convert.choose_format(None, doc_for(acme2_pdf)) == (acme["id"], "confident")
+    assert convert.possible_formats(None, doc_for(acme2_pdf)) == [acme["id"]]
 
 
 def test_a_supplier_never_seen_before_is_new(fake_db, acme_pdf, orbit_pdf):
     fake_db.add_profile("ACME", ACME_COLS, acme_pdf)
-    assert convert.choose_format(None, doc_for(orbit_pdf)) == (None, "new")
+    assert convert.possible_formats(None, doc_for(orbit_pdf)) == []
 
 
-def test_two_formats_that_look_the_same_give_a_best_guess(fake_db, acme_pdf, acme2_pdf):
-    fake_db.add_profile("ACME", ACME_COLS, acme_pdf)
-    fake_db.add_profile("ACME OLD", ACME_COLS, acme_pdf)
-    pid, how = convert.choose_format(None, doc_for(acme2_pdf))
-    assert pid in fake_db.profiles and how == "best guess"
+def test_two_formats_that_look_the_same_are_both_tried(fake_db, acme_pdf, acme2_pdf):
+    a, b = fake_db.add_profile("ACME", ACME_COLS, acme_pdf), fake_db.add_profile("ACME OLD", ACME_COLS, acme_pdf)
+    assert set(convert.possible_formats(None, doc_for(acme2_pdf))) == {a["id"], b["id"]}
 
 
 def test_scans_are_never_matched(fake_db, acme_pdf):
     fake_db.add_profile("ACME", ACME_COLS, acme_pdf)
-    assert convert.choose_format(None, {"has_text_layer": False, "tokens": [], "structural": {}}) == (None, "scanned")
+    assert convert.possible_formats(None, {"has_text_layer": False, "tokens": [], "structural": {}}) == []
 
 
 def test_a_known_format_keeps_only_its_own_columns():
@@ -56,14 +54,3 @@ def test_column_lists_are_not_kept_as_hints():
     assert not hint_rules.useful_hint("The columns are PO No, Date, Item Code and Quantity", cols)
     assert not hint_rules.useful_hint("PO No, Date, Item Code", cols)
     assert not hint_rules.useful_hint("", cols)
-
-
-def test_deleting_one_of_several_teaching_files_unlearns_it(fake_db, acme_pdf, orbit_pdf):
-    p = fake_db.add_profile("ACME", ACME_COLS, acme_pdf)
-    kept, wrong = fake_db.new_document("acme.pdf", pdftext.inspect(acme_pdf)), fake_db.new_document("orbit.pdf", pdftext.inspect(orbit_pdf))
-    for d in (kept, wrong):
-        fake_db.docs[d["id"]].update(stage="confirmed", profile_id=p["id"])
-    p["fingerprint"]["doc_ids"] = [kept["id"], wrong["id"]]
-    learning.forget(None, p["id"], wrong["id"])
-    fp = fake_db.profiles[p["id"]]["fingerprint"]
-    assert fp["doc_ids"] == [kept["id"]] and set(fp["tokens"]) == set(kept["tokens"])

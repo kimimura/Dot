@@ -8,8 +8,7 @@ import pytest
 import config
 from conftest import wait_for
 from core import activity, webhook
-from core.ai.errors import LLMError
-from modules.conversion import convert
+from helpers import teach_acme
 from modules.email_intake import message, service
 
 TOKEN = "test-token"
@@ -43,18 +42,17 @@ def sheet_rows(attachment):
 
 
 def test_pdfs_from_an_email_come_back_as_sheets_named_by_format(client, fake_db, sent, acme_pdf, acme2_pdf, orbit_pdf):
-    fake_db.add_profile("ACME", [("Invoice No", "doc"), ("Item", "row"), ("Qty", "row")], acme_pdf)
+    teach_acme(client, acme_pdf)
     r = send(client, [{"filename": "a.pdf", "content": b64(acme_pdf)}, {"name": "b.PDF", "contentBytes": b64(acme2_pdf)},
                       {"filename": "c.pdf", "content": b64(orbit_pdf)}, {"filename": "logo.png", "content": b64(b"\x89PNG")}])
     assert r.status_code == 200 and r.get_json() == {"status": "accepted", "count": 3, "files": ["a.pdf", "b.PDF", "c.pdf"],
                                                      "skipped": [{"file": "logo.png", "reason": "Not a PDF."}]}
     payload, stamp = wait_for(lambda: sent and sent[0]), only_email(fake_db)["stamp"]
     assert payload["subject"] == "3 PDFs Received" and payload["to"] == "sender@example.com"
-    assert [a["Name"] for a in payload["attachments"]] == [f"ACME_SalesOrder_{stamp}_1.csv", f"ACME_SalesOrder_{stamp}_2.csv",
-                                                            f"Unidentified_SalesOrder_{stamp}.csv"]
-    assert "a.pdf – ACME" in payload["body"] and "c.pdf – Unidentified" in payload["body"]
-    assert sheet_rows(payload["attachments"][1]) == [["Invoice No", "Item", "Qty", "Received From"],
-                                                     ["INV-2026-0107", "A300", "3", "sender@example.com"]]
+    assert [a["Name"] for a in payload["attachments"]] == [f"ACME_SalesOrder_{stamp}_1.csv", f"ACME_SalesOrder_{stamp}_2.csv"]
+    assert "a.pdf – ACME" in payload["body"] and "c.pdf – Not read, teach it in Profile Builder" in payload["body"]
+    assert sheet_rows(payload["attachments"][1]) == [["Invoice No", "Item", "Qty", "Price", "Received From"],
+                                                     ["INV-2026-0107", "A300", "3", "100.00", "sender@example.com"]]
     assert only_email(fake_db)["status"] == "sent" and len(sent) == 1
 
 
@@ -85,14 +83,11 @@ def test_an_email_without_a_readable_pdf_is_turned_away(client, fake_db, sent):
     assert send(client, []).status_code == 400
 
 
-def test_a_pdf_that_fails_is_listed_without_a_sheet(client, fake_db, sent, monkeypatch, acme_pdf):
-    def unavailable(conn, llm, d, pdf):
-        raise LLMError("the reader is unavailable")
-    monkeypatch.setattr(convert, "convert", unavailable)
+def test_a_pdf_of_a_format_not_taught_yet_is_listed_without_a_sheet(client, fake_db, sent, acme_pdf):
     send(client, [{"filename": "a.pdf", "content": b64(acme_pdf)}])
     payload = wait_for(lambda: sent and sent[0])
     assert payload["subject"] == "1 PDF Received" and payload["attachments"] == [] and payload["failed_count"] == 1
-    assert "a.pdf – Could not be read" in payload["body"]
+    assert "a.pdf – Not read, teach it in Profile Builder" in payload["body"]
 
 
 def test_results_that_cannot_be_sent_are_tried_again_then_marked_failed(client, fake_db, sent, monkeypatch, acme_pdf):
@@ -111,7 +106,7 @@ def test_results_still_go_out_after_a_restart(client, fake_db, sent, monkeypatch
     watch = service._watch
     monkeypatch.setattr(service, "_watch", lambda rid: None)
     send(client, [{"filename": "a.pdf", "content": b64(acme_pdf)}])
-    wait_for(lambda: all(d["stage"] == "converted" for d in fake_db.docs.values()))
+    wait_for(lambda: all(d["stage"] in ("converted", "failed") for d in fake_db.docs.values()))
     assert not sent and only_email(fake_db)["status"] == "waiting"
     monkeypatch.setattr(service, "_watch", watch)
     monkeypatch.setattr(config, "EMAIL_INTAKE_TOKEN", "")
@@ -135,13 +130,13 @@ def test_the_message_uses_safe_file_names_and_plain_wording():
 
 
 def test_the_terminal_shows_what_happens_to_an_email(client, fake_db, sent, monkeypatch, acme_pdf, acme2_pdf, orbit_pdf):
+    teach_acme(client, acme_pdf)
     lines = []
     monkeypatch.setattr(activity, "note", lines.append)
-    fake_db.add_profile("ACME", [("Invoice No", "doc"), ("Item", "row"), ("Qty", "row")], acme_pdf)
     send(client, [{"filename": "a.pdf", "content": b64(acme2_pdf)}, {"filename": "c.pdf", "content": b64(orbit_pdf)}])
     wait_for(lambda: any(line.startswith("Reply sent") for line in lines))
     assert lines[0] == "Email from sender@example.com: 2 PDFs"
     assert "Reading a.pdf" in lines and "Reading c.pdf" in lines
-    assert any(line.startswith("Done: a.pdf: ACME, read by the model, 1 row, ") for line in lines)
-    assert any(line.startswith("Done: c.pdf: unknown format, read by the model, ") for line in lines)
+    assert "Done: a.pdf: ACME, fast read, 1 row, 100% checked" in lines
+    assert "Not read: c.pdf: unknown format; open it in Profile Builder" in lines
     assert lines[-1] == 'Reply sent to sender@example.com: "2 PDFs Received"'

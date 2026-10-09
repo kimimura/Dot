@@ -1,4 +1,5 @@
-from flask import jsonify
+from flask import jsonify, request
+from werkzeug.exceptions import HTTPException
 
 import config
 from core.db import DbNotConfigured, Unreachable
@@ -41,7 +42,12 @@ def register(app):
     def _pdf_error(e):
         return jsonify(error="bad pdf", say=str(e)), 400
 
+    @app.errorhandler(HTTPException)
+    def _http(e):
+        # a wrong address or method is the caller's mistake, answered plainly rather than logged as a crash
+        return jsonify(error=e.name.lower(), say=f"{e.code} {e.name}."), e.code
+
     @app.errorhandler(Exception)
     def _500(e):
-        app.logger.exception("unhandled")
+        app.logger.exception(f"Error on {request.method} {request.path}")
         return jsonify(error="server", say=f"Server error ({e.__class__.__name__}) — try again."), 500

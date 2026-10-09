@@ -28,6 +28,7 @@ table.tpl-cols-table td.n { padding-right: 10px; }
 .tpl-card.collapsed .tpl-body { display: none; }
 .tpl-head { user-select: none; }
 .tpl-meta { font-size: 12px; color: var(--ink-4); white-space: nowrap; }
+.tpl-edited { margin-left: 12px; font-size: 12px; font-weight: 400; color: var(--ink-3); white-space: nowrap; }
 .tpl-body .panel-head { border-top: 1px solid var(--border); }
 .tpl-body .panel-head:first-child { border-top: 0; }
 .hints-list { padding: 14px 18px 16px; }

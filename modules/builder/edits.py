@@ -16,7 +16,8 @@ def on_ops(conn, d, pdf, op_list, llm=None):
             d["hints"].append({"scope": "col", "col": str(o.get("col")), "text": f'Do not extract "{o.get("col")}"', "dropped": True})
     table, changes = d["table"], []
     for o in (o for o in op_list if o.get("op") == "reread_cols"):
-        table, ch, edited = column_reread.run(llm, pdf, table, o.get("cols") or [o.get("col")], edited, column_notes(d["hints"]))
+        cols = o.get("cols") or [o.get("col")]
+        table, ch, edited = column_reread.run(llm, pdf, table, cols, edited, column_notes(d["hints"]))
         changes += ch
     plain = [o for o in op_list if o.get("op") != "reread_cols"]
     table, more, edited = table_ops.apply_ops(table, plain, edited)

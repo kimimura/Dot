@@ -15,7 +15,7 @@ def status():
 def get_llm():
     if status() == "offline":
         return OfflineAdapter()
-    key = (config.AI_KEY, tuple(config.AI_MODELS))
+    key = (config.AI_KEY, tuple(config.AI_MODELS), tuple(config.AI_READ_MODELS))
     if key not in _cache:
         _cache.clear()
         _cache[key] = GeminiAdapter(*key)
@@ -24,3 +24,7 @@ def get_llm():
 
 def models():
     return ", ".join(config.AI_MODELS) if status() != "offline" else ""
+
+
+def read_models():
+    return ", ".join(config.AI_READ_MODELS) if status() != "offline" else ""

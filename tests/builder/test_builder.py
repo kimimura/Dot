@@ -1,12 +1,13 @@
 from core import ai
 from core.ai import errors
 from core.ai.errors import Truncated
-from helpers import ACME_COLUMNS, columns, convert
+from helpers import ACME_COLUMNS, columns, convert, read_in_builder, save_as, teach_acme
+from modules.conversion import reading
 
 
 def builder_doc(client, acme_pdf):
-    did = convert(acme_pdf)["id"]
-    env = client.post(f"/api/docs/{did}/review").get_json()
+    did = read_in_builder(client, acme_pdf)
+    env = client.get(f"/api/docs/{did}").get_json()
     assert env["doc"]["stage"] == "review" and columns(env) == ACME_COLUMNS
     return did
 
@@ -154,12 +155,6 @@ def test_cells_typed_by_hand_are_not_added_to_the_conversation(client, acme_pdf)
     assert kept_changes(env) == ['Dropped "Price"']
 
 
-def save_as(client, did, name):
-    for option, extra in (("yes", {}), ("yes", {}), ("submit", {"name": name})):
-        env = client.post(f"/api/docs/{did}/answer", json={"option": option, **extra}).get_json()
-    return env
-
-
 def profile_named(client, name):
     return next((p for p in client.get("/api/profiles").get_json()["profiles"] if p["name"] == name), None)
 
@@ -175,20 +170,22 @@ def test_a_new_format_is_saved_and_recognised_next_time(client, acme_pdf, acme2_
 
 def test_a_name_already_taken_is_asked_again(client, acme_pdf, orbit_pdf):
     save_as(client, builder_doc(client, acme_pdf), "ACME")
-    did = convert(orbit_pdf, "orbit.pdf")["id"]
-    client.post(f"/api/docs/{did}/review")
+    did = read_in_builder(client, orbit_pdf, "orbit.pdf")
     env = save_as(client, did, "acme")
     assert env["doc"]["stage"] == "naming" and "**ACME**" in env["bot"]["say"]
     assert [o["id"] for o in env["bot"]["options"]] == ["use_existing", "back"]
     assert len(client.get("/api/profiles").get_json()["profiles"]) == 1
 
 
-def test_deleting_a_file_makes_its_format_forget_it(client, acme_pdf):
-    did = builder_doc(client, acme_pdf)
-    save_as(client, did, "ACME")
+def test_deleting_every_file_of_a_format_keeps_everything_it_learned(client, fake_db, acme_pdf, acme2_pdf):
+    did = teach_acme(client, acme_pdf)
+    before = {k: fake_db.profiles[profile_named(client, "ACME")["id"]][k] for k in ("fingerprint", "layout", "columns")}
     assert client.delete(f"/api/docs/{did}").status_code == 200
     assert client.get(f"/api/docs/{did}").status_code == 404
-    assert profile_named(client, "ACME")["n_docs"] == 0
+    p = fake_db.profiles[profile_named(client, "ACME")["id"]]
+    assert {k: p[k] for k in before} == before
+    d = convert(acme2_pdf)
+    assert d["stage"] == "converted" and d["profile_id"] == p["id"] and d["table"]["rows"][0]["Item"] == "A300"
 
 
 def test_a_deleted_format_is_gone(client, acme_pdf):
@@ -209,3 +206,24 @@ def test_dot_fixing_row_2_changes_the_row_you_see_as_2(client, acme_pdf, monkeyp
     monkeypatch.setattr(ai, "get_llm", lambda: Stub())
     env = client.post(f"/api/docs/{did}/chat", json={"message": "row 2 quantity should be 6"}).get_json()
     assert [r["Qty"] for r in env["table"]["rows"]] == ["10", "6"]
+
+
+def test_a_known_format_dropped_in_profile_builder_is_read_by_its_layout_with_no_model(client, fake_db, acme_pdf, acme2_pdf, monkeypatch):
+    teach_acme(client, acme_pdf)
+    asked = []
+    real = ai.OfflineAdapter.complete
+    monkeypatch.setattr(ai.OfflineAdapter, "complete", lambda self, pdf, prompt, kind="extract": (asked.append(kind), real(self, pdf, prompt, kind))[1])
+    env = client.get(f"/api/docs/{read_in_builder(client, acme2_pdf, 'acme2.pdf')}").get_json()
+    assert asked == [] and env["doc"]["profile_name"] == "ACME" and columns(env) == ["Invoice No", "Item", "Qty", "Price"]
+    assert [(r["Item"], r["Qty"]) for r in env["table"]["rows"]] == [("A300", "3")]
+
+
+def test_a_known_format_that_doesnt_fit_is_read_by_the_model_in_its_own_columns(client, fake_db, acme_pdf, acme2_pdf, monkeypatch):
+    teach_acme(client, acme_pdf)
+    monkeypatch.setattr(reading, "read_direct", lambda conn, d, prof, texts: (None, None, 'layout changed: "Qty" not found in 1 row'))
+    asked = []
+    real = ai.OfflineAdapter.complete
+    monkeypatch.setattr(ai.OfflineAdapter, "complete", lambda self, pdf, prompt, kind="extract": (asked.append(prompt), real(self, pdf, prompt, kind))[1])
+    env = client.get(f"/api/docs/{read_in_builder(client, acme2_pdf, 'acme2.pdf')}").get_json()
+    assert len(asked) == 1 and 'known format called "ACME"' in asked[0]
+    assert env["doc"]["stage"] == "review" and env["doc"]["profile_name"] == "ACME"

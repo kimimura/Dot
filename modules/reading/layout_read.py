@@ -159,7 +159,8 @@ def _read_doc(variant, texts, many=False):
 
     if failed:
         return None, _row_problem(spec, failed, lines, len(opens))
-    stray = [L for L in range(opens[0], max(used) + 1) if L not in used and _noise_key(lines[L][1]) not in noise]
+    skip = set(variant.get("skip_lines") or ())
+    stray = [L for L in range(opens[0], max(used) + 1) if L not in used and _noise_key(lines[L][1]) not in noise and mask_line(lines[L][1]) not in skip]
     if stray:
         return None, f"layout changed: {len(stray)} line{'' if len(stray) == 1 else 's'} between rows weren't understood"
 

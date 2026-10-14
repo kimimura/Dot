@@ -96,7 +96,7 @@ def on_answer(conn, llm, d, option, payload=None):
         else:
             d["stage"], d["pending_name"] = "save_ask", None
             transcript.bot(d, "save_ask")
-    elif st == "failed":
+    elif st in ("failed", "not_read"):
         if option == "retry":
             d["stage"], d["error"] = "extracting", None
             transcript.bot(d, "extracting_with" if d.get("profile_id") else "extracting_fresh",

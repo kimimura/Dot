@@ -227,3 +227,12 @@ def test_a_known_format_that_doesnt_fit_is_read_by_the_model_in_its_own_columns(
     env = client.get(f"/api/docs/{read_in_builder(client, acme2_pdf, 'acme2.pdf')}").get_json()
     assert len(asked) == 1 and 'known format called "ACME"' in asked[0]
     assert env["doc"]["stage"] == "review" and env["doc"]["profile_name"] == "ACME"
+
+
+def test_a_confirm_the_format_can_t_learn_from_says_so(client, acme_pdf):
+    did = read_in_builder(client, acme_pdf)
+    rows = client.get(f"/api/docs/{did}").get_json()["table"]["rows"]
+    client.post(f"/api/docs/{did}/ops", json={"ops": [{"op": "set_cell", "row": i, "col": "Invoice No", "value": "RM-0091"} for i in range(len(rows))]})
+    save_as(client, did, "ACME")
+    said = [t["text"] for t in client.get(f"/api/docs/{did}").get_json()["transcript"] if t["who"] == "bot"]
+    assert "couldn't learn how" in said[-1] and "Invoice No" in said[-1]

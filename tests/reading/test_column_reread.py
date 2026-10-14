@@ -180,3 +180,17 @@ def test_an_unknown_column_changes_nothing(orders):
     pdf, truth = orders
     table, changes, _ = column_reread.run(Reader(truth), pdf, truth, ["Nope"], set())
     assert table == truth and changes == [{"ok": False, "text": 'No column called "Nope"'}]
+
+
+def test_a_re_read_that_keeps_coming_back_short_stops_asking_after_a_few_tries(orders):
+    pdf, _ = orders
+    calls = []
+
+    class Short:
+        def complete(self, part, prompt, kind="extract"):
+            calls.append(1)
+            return {"rows": []}
+    texts = pdftext.page_texts(pdf)
+    column_reread._read(Short(), pdf, texts, lambda a, b, n: "", expected=lambda a, b: 100)
+    # each part asked again in two halves costs one more request
+    assert len(calls) == (1 + 2 * config.EXTRACT_MAX_EXTRA_READS) * len(column_reread.plan_chunks(texts))

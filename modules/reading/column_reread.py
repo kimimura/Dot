@@ -57,21 +57,25 @@ def _read(llm, pdf, texts, prompt_for, expected=lambda a, b: 0):
     got_rows, got_docs = [], []
     n = len(texts)
     queue = plan_chunks(texts)
+    # asking again in smaller parts is limited, so one re-read never uses up the chat models' day
+    spare = config.EXTRACT_MAX_EXTRA_READS * len(queue)
     while queue:
         a, b = queue.pop(0)
         part = pdf if (a, b) == (1, n) else pdftext.pages(pdf, a, b)
         try:
             raw = llm.complete(part, prompt_for(a, b, n), kind="extract")
         except Truncated:
-            if b - a + 1 <= config.EXTRACT_MIN_SPLIT_PAGES:
+            if b - a + 1 <= config.EXTRACT_MIN_SPLIT_PAGES or spare <= 0:
                 raise
+            spare -= 1
             m = (a + b) // 2
             queue[:0] = [(a, m), (m + 1, b)]
             continue
         raw = raw if isinstance(raw, dict) else {}
         rows = [x for x in raw.get("rows") or [] if isinstance(x, list) and x]
         # dense pages tempt the reader to stop early; fewer items than the pages print means reading them in smaller parts
-        if b > a and len(rows) < config.REREAD_MIN_MATCHED * expected(a, b):
+        if b > a and spare > 0 and len(rows) < config.REREAD_MIN_MATCHED * expected(a, b):
+            spare -= 1
             m = (a + b) // 2
             queue[:0] = [(a, m), (m + 1, b)]
             continue

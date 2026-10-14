@@ -53,6 +53,7 @@ class GeminiAdapter:
 
     def complete(self, pdf, prompt, kind="extract"):
         from google.genai import types
+        # "chat_read" is reading asked for in a chat: the chat models do it, with room for a long answer
         chain = self.read_models if kind == "extract" else self.models
         if not chain:
             raise LLMError(NO_MODEL)

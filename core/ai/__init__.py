@@ -22,6 +22,19 @@ def get_llm():
     return _cache[key]
 
 
+class ChatLane:
+    # whatever a chat message or a sheet edit sets off is the chat models' work; the reading models only read a file at the start
+    def __init__(self, llm):
+        self.llm = llm
+
+    def complete(self, pdf, prompt, kind="extract"):
+        return self.llm.complete(pdf, prompt, kind="chat" if kind == "chat" else "chat_read")
+
+
+def chat_lane(llm):
+    return llm if llm is None or isinstance(llm, ChatLane) else ChatLane(llm)
+
+
 def models():
     return ", ".join(config.AI_MODELS) if status() != "offline" else ""
 

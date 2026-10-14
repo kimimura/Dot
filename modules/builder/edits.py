@@ -1,6 +1,6 @@
 import re
 
-from core import pdftext
+from core import ai, pdftext
 from modules.builder.review import ask_review
 from modules.documents import history, repository as documents, transcript
 from modules.reading import column_reread, table_ops, verify
@@ -14,7 +14,7 @@ def on_ops(conn, d, pdf, op_list, llm=None):
     for o in op_list:
         if o.get("op") == "drop_col":
             d["hints"].append({"scope": "col", "col": str(o.get("col")), "text": f'Do not extract "{o.get("col")}"', "dropped": True})
-    table, changes = d["table"], []
+    table, changes, llm = d["table"], [], ai.chat_lane(llm)
     for o in (o for o in op_list if o.get("op") == "reread_cols"):
         cols = o.get("cols") or [o.get("col")]
         table, ch, edited = column_reread.run(llm, pdf, table, cols, edited, column_notes(d["hints"]))

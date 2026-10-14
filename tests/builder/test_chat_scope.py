@@ -61,3 +61,19 @@ def test_a_column_typed_out_by_the_chat_model_is_read_from_the_pdf_instead(monke
     typed = {"op": "set_col", "col": "Description", "values": ["typed"] * len(before)}
     chat._apply_revision(None, None, d, pdf, "Okay.", [typed], [], "fix the descriptions")
     assert asked == [["Description"]] and [r["Description"] for r in d["table"]["rows"]] == before
+
+
+def test_a_column_re_read_asked_for_in_a_chat_is_done_by_the_chat_models_never_the_reading_models():
+    pdf, _, d = long_doc()
+    kinds = []
+
+    class Spy:
+        def complete(self, part, prompt, kind="extract"):
+            kinds.append(kind)
+            if kind == "chat":
+                return {"reply": "Re-reading it.", "intent": "edit", "ops": [{"op": "reread_cols", "cols": ["Description"]}]}
+            return {"rows": []}
+
+    d["transcript"] = [{"who": "user", "text": "the descriptions are wrong"}]
+    chat._revise(None, Spy(), d, pdf, "the descriptions are wrong")
+    assert kinds[0] == "chat" and len(kinds) > 1 and "extract" not in kinds

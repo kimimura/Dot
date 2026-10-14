@@ -2,7 +2,7 @@ import difflib
 import re
 
 import config
-from core import pdftext
+from core import ai, pdftext
 from core.ai.errors import LLMError, Truncated
 from modules.builder import chat_prompt, chat_scope
 from modules.builder.answers import on_answer
@@ -13,7 +13,7 @@ from modules.companion import dialogue
 from modules.conversion import reading
 from modules.documents import history, repository as documents, transcript
 from modules.profiles import hints as hint_rules, repository as profiles
-from modules.reading import column_reread, table_ops, verify
+from modules.reading import column_reread, printed_words, table_ops, verify
 
 
 YES = re.compile(r"^\s*(y|yes|yeah|yep|yup|correct|right|ok|okay|sure|looks good|that's it|thats it|perfect|good)\b", re.I)
@@ -59,6 +59,7 @@ def _apply_revision(conn, llm, d, pdf, reply, op_list, new_hints, message="", fo
         text = "Nothing to undo" if not done else "Undid the last change" if done == 1 else f"Undid the last {done} changes"
         ask_review(d, reply=reply, applied=bool(done))
         return [{"ok": bool(done), "text": text}]
+    llm = ai.chat_lane(llm)
     before = d["table"]
     table, extra = before, d.get("extra_fields")
     hints = list(d["hints"])
@@ -66,10 +67,10 @@ def _apply_revision(conn, llm, d, pdf, reply, op_list, new_hints, message="", fo
     op_list = no_typing(op_list)
     re_ops = [o for o in op_list if o.get("op") == "reextract"]
     for h in new_hints:
-        hints.append({"scope": h.get("scope", "profile"), "col": h.get("col"), "text": str(h["text"]).strip()})
+        hints.append({"scope": "col", "col": str(h["col"]), "text": str(h["text"]).strip()})
     edited = {k for k, v in (d.get("verification") or {}).get("cells", {}).items() if v == "edited"}
     if re_ops:
-        # reading the whole file again is the reading models' job; the chat model only said how
+        # a chat message never goes to the reading models: the chat models read the file again the way it said
         prof = profiles.get(conn, d["profile_id"]) if d.get("profile_id") else None
         try:
             table, sig, extra = reading.model_read(llm, d, pdf, prof, pdftext.page_texts(pdf), hints,
@@ -84,6 +85,13 @@ def _apply_revision(conn, llm, d, pdf, reply, op_list, new_hints, message="", fo
         if o.get("op") == "reread_cols":
             cols = o.get("cols") or [o.get("col")]
             table, ch, edited = column_reread.run(llm, pdf, table, cols, edited, column_notes(hints))
+            changes += ch
+            continue
+        if o.get("op") == "whole_col":
+            try:
+                table, ch, edited = printed_words.whole(table, o.get("col"), pdftext.text_of(pdf), edited)
+            except table_ops.OpError as e:
+                ch = [{"ok": False, "text": str(e)}]
             changes += ch
             continue
         if o.get("op") == "drop_col":
@@ -124,7 +132,7 @@ def on_chat(conn, llm, d, pdf, message):
     if st == "confirm_ops":
         d["transcript"].pop()
         return on_answer(conn, llm, d, "yes" if YES.match(msg) else "no", {"label": msg})
-    if st in ("identify", "pick", "pick_existing", "duplicate", "save_ask", "failed"):
+    if st in ("identify", "pick", "pick_existing", "duplicate", "save_ask", "failed", "not_read"):
         opt = _text_to_option(conn, d, msg)
         if opt:
             d["transcript"].pop()
@@ -172,7 +180,7 @@ def _text_to_option(conn, d, msg):
             return "new"
         if st == "identify":
             return "no"
-    if st == "failed" and re.search(r"\b(retry|again|try)\b", msg, re.I):
+    if st in ("failed", "not_read") and re.search(r"\b(retry|again|try|read)\b", msg, re.I):
         return "retry"
     return None
 
@@ -240,7 +248,7 @@ def _revise(conn, llm, d, pdf, message):
     cols_now = [c["name"] for c in d["table"]["columns"]]
     op_list = [_from_sheet_letters(_from_sheet_rows(o), cols_now) for o in ((raw or {}).get("ops") or []) if isinstance(o, dict)]
     new_hints = [h for h in ((raw or {}).get("hints") or [])
-                 if isinstance(h, dict) and h.get("text") and hint_rules.useful_hint(h.get("text"), cols_now)
+                 if isinstance(h, dict) and h.get("text") and h.get("col") and hint_rules.useful_hint(h.get("text"), cols_now)
                  and not hint_rules.about_order(h.get("text"))]
 
     if intent == "confirm" and not op_list:

@@ -34,8 +34,12 @@ def profile_prompt(profile, hints, fresh=False):
     doc_cols = [c for c in profile["columns"] if c.get("kind") == "doc"]
     row_cols = [c for c in profile["columns"] if c.get("kind") != "doc"]
 
+    # a column's hint from this file's chat replaces the format's own until the file is confirmed
+    said = {h["col"]: h["text"] for h in hints if h.get("scope") == "col" and h.get("col") and not h.get("alias") and not h.get("dropped")}
+
     def fmt(cols):
-        return "\n".join(f'  - "{c["name"]}"' + (f' — {c["hint"]}' if c.get("hint") else "") for c in cols) or "  (none)"
+        hint = lambda c: said.get(c["name"]) or c.get("hint")
+        return "\n".join(f'  - "{c["name"]}"' + (f' — {hint(c)}' if hint(c) else "") for c in cols) or "  (none)"
 
     columns_rule = (f"Use the columns below with these exact names, and add any other field you find as a new column. {EVERY_FIELD}"
                     if fresh else 'Produce exactly the columns below, using these exact names. Use "" for any column that is absent in this document. Do not add other columns to the table.')
@@ -44,9 +48,6 @@ def profile_prompt(profile, hints, fresh=False):
         "", "Document-level fields (once per document):", fmt(doc_cols),
         "", "Row-level columns (one per repeating line item):", fmt(row_cols),
     ]
-    rules = [h["text"] for h in profile.get("hints", [])] + [h["text"] for h in hints if h.get("scope") != "col"]
-    if rules:
-        lines += ["", "Rules learned from previous documents of this format:"] + [f"  - {r}" for r in rules]
     ex = (profile.get("examples") or [None])[0]
     rcols = [c["name"] for c in row_cols]
     if ex and ex.get("rows") and rcols:

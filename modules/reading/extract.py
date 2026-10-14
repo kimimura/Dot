@@ -93,7 +93,7 @@ def run(llm, pdf, profile=None, hints=None, instruction=None, progress=None, tex
         if table is None:
             table, sig = t, parsed["signature"]
             if not profile and not whole:
-                template = {"name": "this document", "columns": [dict(c) for c in t["columns"]], "hints": [],
+                template = {"name": "this document", "columns": [dict(c) for c in t["columns"]],
                             "examples": [{"rows": [{k: v for k, v in r.items() if k != "_doc"} for r in t["rows"][:2]]}]}
         else:
             _append(table, t)

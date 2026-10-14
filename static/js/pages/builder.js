@@ -167,6 +167,8 @@ async function runExtract(id) {
 
 async function act(method, path, body) {
   if (state.busy) return;
+  // cell edits still waiting go first, so a confirm or a reply always sees them
+  await flushOps();
   setBusy(true, "thinking");
   try { renderEnvelope(await api(method, path, body)); }
   catch (e) {
@@ -317,15 +319,20 @@ function columnMenu(th, table) {
 }
 
 function queueOp(op) {
+  // edits belong to the file they were typed in, even when another file is open by the time they are sent
+  if (state.opsQueue.length && state.opsDoc !== state.doc.id) flushOps();
+  state.opsDoc = state.doc.id;
   state.opsQueue.push(op);
   clearTimeout(state.opsTimer);
   state.opsTimer = setTimeout(flushOps, 350);
 }
 async function flushOps() {
-  if (!state.opsQueue.length || !state.doc) return;
-  const ops = state.opsQueue.splice(0);
+  clearTimeout(state.opsTimer);
+  if (!state.opsQueue.length) return;
+  const id = state.opsDoc, ops = state.opsQueue.splice(0);
   try {
-    const env = await api("POST", `/api/docs/${state.doc.id}/ops`, { ops });
+    const env = await api("POST", `/api/docs/${id}/ops`, { ops });
+    if (!state.doc || state.doc.id !== id) return;
     state.doc = env.doc; state.table = env.table;
     const active = document.activeElement, keep = active && active.classList.contains("cell") ? [active.dataset.row, active.dataset.col] : null;
     renderSheet($("#sheet-col"), env.table, { readonly: false, doc: env.doc, edit: bindGridEditing });

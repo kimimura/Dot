@@ -3,7 +3,7 @@ from bisect import bisect_left, bisect_right
 from collections import Counter
 
 import config
-from modules.reading.layout_tokens import apply_rule, class_pattern, join_tokens, line_middles, mask_line, mask_token, split_lines
+from modules.reading.layout_tokens import apply_rule, class_pattern, join_tokens, line_middles, mask_line, mask_token, skip_shape, split_lines, uncut
 
 
 def seqs_of(col):
@@ -27,7 +27,7 @@ def _regex(spec, drop=None):
 
 
 def _lead_regex(spec, n):
-    return re.compile("^" + "".join(_piece(col) for col in spec[:n]))
+    return re.compile("^" + "".join(f"(?:{_piece(col)})?" if col["optional"] else _piece(col) for col in spec[:n]))
 
 
 def _noise_key(toks):
@@ -35,13 +35,16 @@ def _noise_key(toks):
     return mask_line(toks) if any(mask_token(t) != "#" for t in toks) else " ".join(toks)
 
 
-def _noise(lines):
-    pages = {p for p, _ in lines}
+def _noise(lines, pages=None):
+    # lines repeated on every page the items run across (a table header printed again on each page) are page furniture;
+    # a last page holding only the totals doesn't make them part of the items
+    pages = pages or {p for p, _ in lines}
     if len(pages) < 2:
         return set()
     seen = {}
     for p, toks in lines:
-        seen.setdefault(_noise_key(toks), set()).add(p)
+        if p in pages:
+            seen.setdefault(_noise_key(toks), set()).add(p)
     return {k for k, ps in seen.items() if len(ps) == len(pages)}
 
 
@@ -98,6 +101,17 @@ def read_variant(variant, texts):
     return out, None
 
 
+def _almost_a_row(spec, lines, region, tallest):
+    drops = [(col["col"], _regex(spec, drop=k)) for k, col in enumerate(spec) if not col["var"] and not col["optional"]]
+    for L in region:
+        for m in range(1, tallest + 1):
+            text = " ".join(t for j in range(L, min(L + m, len(lines))) for t in lines[j][1]) + " "
+            hit = next((c for c, rx in drops if rx.match(text)), None)
+            if hit:
+                return hit
+    return None
+
+
 def _read_doc(variant, texts, many=False):
     lines = split_lines(texts)
     if any(r.get("wrap") for r in variant["fields"].values()) and not any(e for line in lines.edges for e in line):
@@ -120,12 +134,15 @@ def _read_doc(variant, texts, many=False):
     opens = [i for i in range(len(lines)) if lead_re.match(" ".join(t for j in range(i, min(i + span, len(lines))) for t in lines[j][1]) + " ")]
     if not opens:
         return None, "layout changed: no rows found"
-    noise = _noise(lines)
+    noise = _noise(lines, {lines[i][0] for i in opens})
     tail = next(((k, c["tail"]) for k, c in enumerate(spec) if c.get("tail")), None)
     tail_re = re.compile("|".join(class_pattern(x) for x in tail[1])) if tail else None
 
     middles = line_middles(texts)
-    rows, failed, used = [], [], set()
+    # an item may end in values only some items print (a code under it): the item then takes them, rather than ending a line early
+    last_kept = max((k for k, c in enumerate(spec) if not c["optional"]), default=len(spec) - 1)
+    grows = last_kept < len(spec) - 1 and not any(c["var"] for c in spec[last_kept + 1:])
+    rows, failed, used, tallest = [], [], set(), 1
     for k, start in enumerate(opens):
         stop = opens[k + 1] if k + 1 < len(opens) else len(lines)
         for m in range(span, min(stop - start, config.LAYOUT_MAX_ROW_LINES) + 1):
@@ -133,11 +150,18 @@ def _read_doc(variant, texts, many=False):
             mt = row_re.match(" ".join(t for _, t in toks) + " ")
             if not mt:
                 continue
+            for longer in range(min(stop - start, config.LAYOUT_MAX_ROW_LINES), m, -1) if grows else ():
+                more = [(L, t) for L in range(start, start + longer) for t in lines[L][1]]
+                got = row_re.match(" ".join(t for _, t in more) + " ")
+                if got:
+                    m, toks, mt = longer, more, got
+                    break
             row, starts = _values(spec, mt, toks, line_len)
             off = _by_position(spec, row, starts, toks, [x for L in range(start, start + m) for x in middles[L]])
             if off:
                 return None, off
             used.update(range(start, start + m))
+            tallest = max(tallest, m)
             j, extra = start + m, []
             while tail and j < stop:
                 if _noise_key(lines[j][1]) in noise:
@@ -160,9 +184,13 @@ def _read_doc(variant, texts, many=False):
     if failed:
         return None, _row_problem(spec, failed, lines, len(opens))
     skip = set(variant.get("skip_lines") or ())
-    stray = [L for L in range(opens[0], max(used) + 1) if L not in used and _noise_key(lines[L][1]) not in noise and mask_line(lines[L][1]) not in skip]
+    stray = [L for L in range(opens[0], max(used) + 1) if L not in used and _noise_key(lines[L][1]) not in noise and skip_shape(lines[L][1]) not in skip]
     if stray:
         return None, f"layout changed: {len(stray)} line{'' if len(stray) == 1 else 's'} between rows weren't understood"
+    # an item missed before the first row or after the last reads as a row with one column off; nothing else there does
+    lost = _almost_a_row(spec, lines, list(range(opens[0])) + list(range(max(used) + 1, len(lines))), tallest)
+    if lost:
+        return None, f'layout changed: "{lost}" not found in 1 row'
 
     return [{**r, **doc} for r in rows], None
 
@@ -181,12 +209,7 @@ def _values(spec, mt, toks, line_len):
         starts[col["col"]] = bisect_left(offs, a)
         part = toks[starts[col["col"]]:bisect_right(offs, b - 1)]
         v = join_tokens(part, line_len, col.get("glue", False)) if col["var"] else " ".join(t for _, t in part)
-        cut = col.get("cut") or {}
-        if cut.get("prefix") and v.startswith(cut["prefix"]):
-            v = v[len(cut["prefix"]):]
-        if cut.get("suffix") and v.endswith(cut["suffix"]):
-            v = v[:-len(cut["suffix"])]
-        out[col["col"]] = v
+        out[col["col"]] = uncut(v, col.get("cut"))
     return out, starts
 
 

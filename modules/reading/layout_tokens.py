@@ -68,6 +68,34 @@ def mask_line(toks):
     return " ".join(mask_token(t) for t in toks)
 
 
+def skip_shape(toks):
+    # a line to skip: numbers masked, but a line of numbers alone keeps each number's length (40267609 is INT:8, never a line number)
+    return mask_line(toks) if any(mask_token(t) != "#" for t in toks) else " ".join(token_class(t) for t in toks)
+
+
+def _shape_pattern(text):
+    return "".join(r"[A-Za-z]+" if m.group(1) else r"\d+" if m.group(2) else re.escape(m.group(0))
+                   for m in re.finditer(r"([A-Za-z]+)|(\d+)|.", text, re.S))
+
+
+def cut_texts(cut, kind):
+    t = (cut or {}).get(kind)
+    return [] if not t else [t] if isinstance(t, str) else list(t)
+
+
+def uncut(value, cut):
+    # the part of a printed word the sheet keeps; a cut learned in several ways (FC-, UHU-) also takes any text shaped like them
+    for kind in ("prefix", "suffix"):
+        texts = cut_texts(cut, kind)
+        pats = [_shape_pattern(t) for t in texts] if len(texts) > 1 else [re.escape(t) for t in texts]
+        for p in pats:
+            m = re.fullmatch(f"(?:{p})(.+)" if kind == "prefix" else f"(.+)(?:{p})", value)
+            if m:
+                value = m.group(1)
+                break
+    return value
+
+
 def word_set(s):
     return {w for w in re.split(r"[^a-z0-9]+", (s or "").lower()) if w}
 

@@ -72,10 +72,15 @@ def flatten(parsed):
         for k in d["row_columns"]:
             if k not in row_names:
                 row_names.append(k)
+    # a name given both for the document and for its items is one column when the items repeat the document's value;
+    # only items holding values of their own make a second column
     renames = {}
     for k in list(row_names):
         if k in doc_names:
-            renames[k] = k + " (Line)"
+            if all(r.get(k, "") in ("", d["document_fields"].get(k, "")) for d in parsed["documents"] for r in d["rows"]):
+                row_names.remove(k)
+            else:
+                renames[k] = k + " (Line)"
     row_names = [renames.get(k, k) for k in row_names]
     columns = [{"name": n, "kind": "doc"} for n in doc_names] + [{"name": n, "kind": "row"} for n in row_names]
     rows = []
@@ -87,7 +92,8 @@ def flatten(parsed):
                 for n in row_names:
                     row[n] = ""
                 for k, v in r.items():
-                    row[renames.get(k, k)] = v
+                    if k in row_names or k in renames:
+                        row[renames.get(k, k)] = v
                 rows.append(row)
         else:
             row = {"_doc": i, **base}

@@ -7,7 +7,7 @@ import config
 from modules.reading.layout_places import (Unlearnable, doc_pages, field_rule, join_pieces, leftover_place,
                                            split_span, table_bands, value_spans)
 from modules.reading.layout_read import read_variant
-from modules.reading.layout_tokens import (apply_rule, join_tokens, line_middles, mask_line, mask_token, similar, split_lines,
+from modules.reading.layout_tokens import (apply_rule, join_tokens, line_middles, similar, skip_shape, split_lines,
                                            tidy_classes, token_class, word_set)
 from modules.reading.verify import norm_text
 
@@ -82,12 +82,28 @@ def _gaps(where, tail, toks):
     return gaps
 
 
+def _learn_cut(c, cuts):
+    # the part of the printed word left out may differ row to row (FC-187054, UHU-90-043-570); each one seen in two rows is learned
+    total = sum(cuts.values())
+    seen = {k: n for k, n in cuts.items() if k and (n >= 2 or n == total)}
+    if sum(seen.values()) < (1 - config.LAYOUT_TRUST) * total:
+        return None
+    kinds = {kind for kind, _ in seen}
+    if len(kinds) > 1:
+        raise Unlearnable(f'"{c}" is cut out of the printed words in different ways')
+    texts = sorted(t for _, t in seen)
+    return {kinds.pop(): texts[0] if len(texts) == 1 else texts}
+
+
 def _skip_lines(placed, one_page):
     # printed lines inside the rows that the confirmed sheet kept nothing from (e.g. "6 BOXES 5.00 4.21" under an item):
-    # their shape, numbers masked, is skipped on new files; a line of numbers alone is never learned, so a lost row can't hide as one
+    # their shape, numbers masked, is skipped on new files; a line holding only a short whole number is never learned, so a lost row's line number can't hide as one
     # the last row of each document runs into its footer, and a row across a page break holds the next page's header,
-    # so only rows on one page with another row after them teach lines to skip
+    # so only rows on one page with another row after them teach lines to skip; above a document's first row is its header
     last = {r.get("_doc", 0): i for i, (r, *_) in enumerate(placed)}
+    first = {}
+    for i, (r, *_) in enumerate(placed):
+        first.setdefault(r.get("_doc", 0), i)
     shapes = set()
     for i, (r, toks, where, tail, _) in enumerate(placed):
         if last[r.get("_doc", 0)] == i or id(r) not in one_page:
@@ -99,8 +115,8 @@ def _skip_lines(placed, one_page):
         for L, t in toks:
             by_line.setdefault(L, []).append(t)
         for L, words in by_line.items():
-            if L not in kept and any(mask_token(t) != "#" for t in words):
-                shapes.add(mask_line(words))
+            if (L > min(kept) or first[r.get("_doc", 0)] != i) and L not in kept and not (len(words) == 1 and re.fullmatch(rf"\d{{1,{config.LAYOUT_LINE_NUMBER_DIGITS}}}", words[0])):
+                shapes.add(skip_shape(words))
     return sorted(shapes)
 
 
@@ -281,7 +297,9 @@ def learn(table, texts):
     order = _merged_order(votes)
     sizes = {c: Counter(where[c][1] - where[c][0] for _, _, where, _, _ in complete if c in where) for c in in_row}
     fixed = {c for c, cnt in sizes.items() if cnt and max(cnt.values()) >= 0.8 * sum(cnt.values()) and max(cnt) <= 4}
-    rare = {c: {n for n, k in sizes[c].items() if k < (1 - config.LAYOUT_TRUST) * sum(sizes[c].values())} for c in fixed}
+    # a shape in only a row or two is a slip in the sheet; one recurring in several rows is how the PDF prints them (UHU 97-033-510)
+    rare = {c: {n for n, k in sizes[c].items() if k < (1 - config.LAYOUT_TRUST) * sum(sizes[c].values()) and k < config.LAYOUT_PATTERN_ROWS}
+            for c in fixed}
     # spilled text belongs to a free-length text column, never to a column that almost always has one shape
     tail_votes = Counter(c for _, _, _, tail, _ in complete for c in tail)
     free = [c for c in tail_votes if c not in fixed]
@@ -311,6 +329,8 @@ def learn(table, texts):
         if not counts and c in skipped:
             # a part to skip seen only in rows that were set aside isn't part of the layout
             continue
+        if not counts:
+            raise Unlearnable(f'"{c}" only has values in rows that don\'t match the PDF: check those rows')
         col = {"col": c, "optional": any(not r.get(c) for r in all_rows)}
         if c in skipped:
             col.update(optional=any(c not in where for _, _, where, _, _ in placed), skip=True)
@@ -331,19 +351,12 @@ def learn(table, texts):
             col["seqs"] = {n: [tidy_classes(p, widen=k > 0) for p in pos] for n, pos in seqs.items()}
             if list(col["seqs"]) == ["1"] and _counts_up(c, all_rows):
                 col["seqs"] = {"1": [[f"INT:1-{config.LAYOUT_LINE_NUMBER_DIGITS}"]]}
-            cuts = Counter(cut_of[id(r)].get(c) for r, _, where, _, _ in placed if c in where)
-            (kind_text, n), total = cuts.most_common(1)[0], sum(cuts.values())
-            if kind_text and n < config.LAYOUT_TRUST * total:
-                raise Unlearnable(f'"{c}" is cut out of the printed words in different ways')
-            if kind_text:
-                col["cut"] = {kind_text[0]: kind_text[1]}
+            cut = _learn_cut(c, Counter(cut_of[id(r)].get(c) for r, _, where, _, _ in placed if c in where))
+            if cut:
+                col["cut"] = cut
         spec.append(col)
     _learn_spots(spec, spot_rows, all_rows)
-    lead = []
-    for col in spec:
-        if col["var"] or col["optional"] or len(col["seqs"]) > 1:
-            break
-        lead.append(col)
+    lead = lead_of(spec)
     if not lead:
         first = spec[0]
         why = "it is optional" if first["optional"] else "its length varies" if first["var"] else "it comes in several shapes"
@@ -402,6 +415,18 @@ def learn(table, texts):
         raise Unlearnable(f'reading it back gave {len(diffs)} different cell{"" if len(diffs) == 1 else "s"}, '
                           f'e.g. row {i + 1} "{c}": {got[i].get(c, "")!r} instead of {all_rows[i].get(c, "")!r}')
     return variant
+
+
+def lead_of(spec):
+    # the columns every row opens with; one only some rows print (a brand word before the code) may sit inside, never at the end
+    lead = []
+    for col in spec:
+        if col["var"]:
+            break
+        lead.append(col)
+    while lead and lead[-1]["optional"]:
+        lead.pop()
+    return lead
 
 
 def _learn_glue(c, placed):

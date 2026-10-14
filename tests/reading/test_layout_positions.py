@@ -101,3 +101,107 @@ def test_the_line_under_a_store_name_stays_out_when_it_opens_the_address_or_woul
 def test_a_sheet_without_wrapped_names_never_joins_lines():
     assert "wrap" not in taught()["variants"][0]["fields"]["Store Code"]
     assert stores([("HQ292394", ("SMO Bookstores Kota Bharu Kompleks", "Mutiara"), ITEM)], taught()) == ["SMO Bookstores Kota Bharu Kompleks"]
+
+
+def taught_brands(lay=None):
+    pdf, sheet = pdfgen.smo_po(pdfgen.SMO_BRANDS)
+    return layout.add(lay, sheet, pdftext.page_texts(pdf), "brands")
+
+
+def test_codes_cut_out_of_different_brand_words_and_a_number_line_under_an_item_are_learned():
+    lay = taught_brands()
+    assert not lay.get("last_problem")
+    v = lay["variants"][0]
+    cols = {c["col"]: c for c in v["row"]}
+    assert cols["Item Code"]["cut"] == {"prefix": ["FC-", "UHU-"]}
+    assert cols["_after No"]["skip"] and cols["_after No"]["optional"] and v["skip_lines"] == ["INT:8"]
+    pdf, sheet = pdfgen.smo_po(pdfgen.SMO_BRANDS)
+    texts = pdftext.page_texts(pdf)
+    table, note = layout.read_table(lay, PROFILE, texts)
+    assert note is None and plain(table["rows"]) == plain(sheet["rows"])
+    ver = verify.verify(table, "\n\n".join(texts), True)
+    assert ver["verified"] == ver["total"]
+
+
+def test_a_code_cut_out_of_a_brand_word_never_seen_is_cut_the_same_way():
+    item = ("12-345-678", "289999990000", "STAEDTLER ERASER", "10.0000", "B0010", "1", "ctn", {"printed": "STA-12-345-678", "bare": True})
+    pdf, want = pdfgen.smo_po([("HQ292399", "SMO Bookstores Raub", [pdfgen.SMO_BRANDS[1][2][0], item, pdfgen.SMO_BRANDS[1][2][3]])])
+    table, note = layout.read_table(taught_brands(), PROFILE, pdftext.page_texts(pdf))
+    assert note is None and [r["Item Code"] for r in table["rows"]] == ["187079", "12-345-678", "90-040-759"]
+
+
+def test_a_confirmed_file_adds_to_the_layout_instead_of_standing_beside_it():
+    lay = taught_brands(taught())
+    assert not lay.get("last_problem") and len(lay["variants"]) == 1
+    for orders in (pdfgen.SMO_NEW, pdfgen.SMO_BRANDS, pdfgen.SMO_TRAIN):
+        pdf, want = pdfgen.smo_po(orders)
+        table, note = layout.read_table(lay, PROFILE, pdftext.page_texts(pdf))
+        assert note is None and plain(table["rows"]) == plain(want["rows"])
+    # pieces, learned from the first file, next to brand codes, learned from the second, in one new file
+    mixed = [("HQ292400", "SMO Bookstores Pekan", [pdfgen.SMO_NEW[0][2][0], pdfgen.SMO_BRANDS[0][2][2], pdfgen.SMO_BRANDS[0][2][3],
+                                                   pdfgen.SMO_BRANDS[0][2][4]])]
+    pdf, want = pdfgen.smo_po(mixed)
+    table, note = layout.read_table(lay, PROFILE, pdftext.page_texts(pdf))
+    assert note is None and plain(table["rows"]) == plain(want["rows"])
+
+
+def test_a_cut_code_is_given_back_whole_from_the_pdf_for_every_row_without_a_model():
+    from modules.reading import printed_words
+    pdf, sheet = pdfgen.smo_po(pdfgen.SMO_BRANDS)
+    text = "\n\n".join(pdftext.page_texts(pdf))
+    table, changes, _ = printed_words.whole(sheet, "Item Code", text, set())
+    assert [r["Item Code"] for r in table["rows"]] == ["FC-187054", "UHU-90-043-570", "97-033-510", "UHU-90-000-015", "UHU-90-036-355",
+                                                      "FC-187079", "UHU-90-000-015", "97-033-515", "UHU-90-040-759"]
+    assert changes[0]["text"] == 'Took "Item Code" as printed in full (7 of 9 rows)'
+    ver = verify.verify(table, text, True)
+    assert ver["verified"] == ver["total"]
+
+
+def test_codes_kept_whole_as_printed_two_words_in_several_rows_are_learned_and_replace_an_old_cut():
+    orders = pdfgen.SMO_BRANDS + [("HQ292283", "SMO Bookstores Pekan", [pdfgen.SMO_BRANDS[0][2][2], pdfgen.SMO_BRANDS[1][2][3]])]
+    pdf, sheet = pdfgen.smo_po(orders)
+    printed = [i[7].get("printed", f"FC-{i[0]}") if len(i) > 7 else f"FC-{i[0]}" for _, _, items in orders for i in items]
+    for r, code in zip(sheet["rows"], printed):
+        r["Item Code"] = code
+    lay = layout.add(taught(), sheet, pdftext.page_texts(pdf), "whole")
+    assert not lay.get("last_problem") and len(lay["variants"]) == 1
+    cols = {c["col"]: c for c in lay["variants"][0]["row"]}
+    assert "cut" not in cols["Item Code"] and set(cols["Item Code"]["seqs"]) == {"1", "2"}
+    table, note = layout.read_table(lay, PROFILE, pdftext.page_texts(pdf))
+    assert note is None and plain(table["rows"]) == plain(sheet["rows"])
+    old, _ = pdfgen.smo_po(pdfgen.SMO_NEW)
+    table, note = layout.read_table(lay, PROFILE, pdftext.page_texts(old))
+    assert note is None and [r["Item Code"] for r in table["rows"]] == ["FC-178330", "FC-584803", "FC-100028295"]
+
+
+def lost_item_po(at):
+    # an item whose barcode prints as "N/A" opens no row the layout knows
+    items = list(pdfgen.SMO_BRANDS[1][2][:3])
+    items.insert(at, ("90-040-999", "N/A", "UHU NEW THING", "10.0000", "B0010", "1", "ctn", {"printed": "UHU-90-040-999"}))
+    pdf, _ = pdfgen.smo_po([("HQ292401", "SMO Bookstores Raub", items)])
+    return pdftext.page_texts(pdf)
+
+
+def test_an_item_the_layout_can_t_read_at_either_end_of_a_po_stops_the_file_instead_of_going_missing():
+    lay = taught_brands()
+    table, note = layout.read_table(lay, PROFILE, lost_item_po(3))
+    assert table is None and note.endswith('not found in 1 row')
+    table, note = layout.read_table(lay, PROFILE, lost_item_po(0))
+    assert table is None and note.endswith('not found in 1 row')
+
+
+def test_a_file_with_one_po_confirmed_into_a_format_keeps_how_files_with_many_pos_are_split():
+    one, sheet = pdfgen.smo_po(pdfgen.SMO_NEW)
+    lay = layout.add(taught(), sheet, pdftext.page_texts(one), "one")
+    assert lay["variants"][0]["split_by"] == "PO No."
+    pdf, want = pdfgen.smo_po(pdfgen.SMO_TRAIN)
+    table, note = layout.read_table(lay, PROFILE, pdftext.page_texts(pdf))
+    assert note is None and plain(table["rows"]) == plain(want["rows"])
+
+
+def test_a_column_renamed_on_the_profiles_page_is_still_read_under_its_new_name():
+    lay = layout.rename(taught(), "Item Code", "Code")
+    renamed = {"columns": [{**c, "name": "Code"} if c["name"] == "Item Code" else c for c in PROFILE["columns"]]}
+    pdf, want = pdfgen.smo_po(pdfgen.SMO_NEW)
+    table, note = layout.read_table(lay, renamed, pdftext.page_texts(pdf))
+    assert note is None and [r["Code"] for r in table["rows"]] == [r["Item Code"] for r in want["rows"]]

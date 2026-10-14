@@ -168,6 +168,10 @@ def row_bands(table, flat, starts):
     heights = [l2 - l1 for (r1, l1), (r2, l2) in zip(anchors, anchors[1:]) if r2 == r1 + 1]
     tail = min(config.VERIFY_MAX_TAIL_LINES, max(heights, default=6))
     n_lines = len(starts)
+    # columns most rows print above their anchor (a code on its own line over the barcode) open those rows' bands
+    ups = [_above_anchor(table["rows"][i], table["rows"][i - 1] if i else {}, rcols, flat, starts, line_at[k - 1] + 1 if k else 0, line)
+           for k, (i, line) in enumerate(anchors)]
+    opening = {c for c in rcols if sum(c in u for u in ups) >= config.VERIFY_OPENING_SHARE * len(ups)}
     bands = []
     for i in range(len(table["rows"])):
         k = bisect_right(rows_at, i) - 1
@@ -179,6 +183,8 @@ def row_bands(table, flat, starts):
                 bands.append(closed)
                 continue
         start = line_at[k] if k >= 0 else 0
+        if k >= 0 and rows_at[k] == i and opening:
+            start = min([bisect_right(starts, p) - 1 for c, p in ups[k].items() if c in opening] + [start])
         if k + 1 < len(rows_at):
             end = line_at[k + 1]
         elif k >= 0 and rows_at[k] == i:
@@ -202,6 +208,15 @@ def _closing_band(table, i, rcols, flat, starts, above, line, below):
     if i + 1 < len(table["rows"]):
         end = _next_row_line(table["rows"][i + 1], rcols, flat, starts, line + 1, below)
     return pos(bisect_right(starts, min(up)) - 1), pos(end)
+
+
+def _above_anchor(row, before, rcols, flat, starts, above, line):
+    # where the row's values sit between the row before's last value and the row's anchor line
+    pos = lambda n: starts[n] if n < len(starts) else len(flat)
+    anchors = lambda r: {c: v for c in rcols for v in [norm_text(r.get(c, ""))] if len(v) >= config.VERIFY_MIN_ANCHOR}
+    prev = [p for p in (flat.rfind(v, pos(above), pos(line)) for v in anchors(before).values()) if p >= 0]
+    first = bisect_right(starts, max(prev)) if prev else above
+    return {c: p for c, v in anchors(row).items() for p in [flat.rfind(v, pos(first), pos(line))] if p >= 0}
 
 
 def _next_row_line(row, rcols, flat, starts, first, last):
@@ -248,8 +263,8 @@ def _runs_on(chars, lines, plain, at_start, first, begins=None):
                 continue
             end = after[m - 1]
             nxt = next((k for k in range(end, len(chars)) if "a" <= chars[k] <= "z" or "0" <= chars[k] <= "9"), end)
-            # a separator between the two parts, like the dash in "W20 - Black", may end this line or start the next
-            for k in {end, nxt}:
+            # a separator between the two parts, like the dash in "W20 - Black" or ")(" in "(Half) (115902)", may split anywhere across the two lines
+            for k in range(end, nxt + 1):
                 if _fits(chars[:k], lines[i], at_start, True) and _runs_on(chars[k:], lines, plain, True, i + 1):
                     return True
     return False
@@ -270,14 +285,58 @@ def _own_lines(rows, rcols, plain):
     distinct = {c: len({first(r, c) for r in rows}) for c in rcols}
     alike = [c for c in rcols if 2 * alone[c] >= len(rows)]
     apart = [c for c in alike if 2 * distinct[c] >= max(distinct[x] for x in alike)]
-    lead = max(apart, key=lambda c: (round(alone[c] / len(rows), 1), distinct[c], -rcols.index(c)), default=None)
-    if not lead:
+    if not apart:
         return [None] * len(rows)
+    # a value alone on a line (a line number, a barcode, a code printed under the item) may open its row's lines or close them;
+    # the reading whose lines hold most of each row is the right one
+    own = {}
+    for c in apart:
+        opened = _opened_by(rows, c, first, at, plain)
+        own[(c, 0)], own[(c, 1)] = opened, _closed_by(rows, c, first, at, opened, rcols, plain)
+    held = {k: sum(1 for r, o in zip(rows, spans) if o for x in rcols for v in [norm_text(r.get(x, ""))]
+                   if len(v) >= config.VERIFY_MIN_ANCHOR and v in "".join(plain[o[0]:o[1]])) for k, spans in own.items()}
+    best = max(own, key=lambda k: (held[k], round(alone[k[0]] / len(rows), 1), distinct[k[0]], -rcols.index(k[0]), -k[1]))
+    return own[best]
+
+
+def _closed_by(rows, lead, first, at, opened, rcols, plain):
+    # the same lines read the other way: each row runs from just after the row before's value down to its own value;
+    # a value printed twice within one item (a code in the description and again under it) closes the item at the last
+    starts = [o[0] for o in opened if o]
+    steps = sorted(b - a for a, b in zip(starts, starts[1:]) if b > a)
+    if not steps:
+        return [None] * len(rows)
+    usual = steps[len(steps) // 2]
+    tall = min(steps[-1], 2 * usual)
+    values = lambda r: {v for v in (norm_text(r.get(c, "")) for c in rcols) if len(v) >= config.VERIFY_MIN_ANCHOR}
+    out, prev, between = [], None, []
+    for r in rows:
+        hits = at.get(first(r, lead), []) if first(r, lead) else []
+        k = bisect_right(hits, -1 if prev is None else prev)
+        if k == len(hits) or (prev is not None and hits[k] - prev > config.VERIFY_MAX_ROW_JUMP):
+            out.append(None)
+            between.append(r)
+            continue
+        while k + 1 < len(hits) and hits[k + 1] - hits[k] < usual:
+            k += 1
+        end = hits[k]
+        start = prev + 1 if prev is not None and end - prev <= tall else max(0, end + 1 - tall)
+        if between:
+            # rows in between that print no such value: this row starts where its own values do, past theirs
+            mine = values(r) - {v for x in between for v in values(x)}
+            start = next((L for L in range(start, end + 1) if any(v in plain[L] for v in mine)), start)
+        out.append((start, end + 1))
+        prev, between = end, []
+    return out
+
+
+def _opened_by(rows, lead, first, at, plain):
     opens = {first(r, lead) for r in rows} - {""}
     own, prev = [], -1
     # rows are printed in sheet order: each row opens at the next line holding its value
     for r in rows:
-        hits = at.get(first(r, lead), [])
+        # a row that leaves the value empty can't be found by it
+        hits = at.get(first(r, lead), []) if first(r, lead) else []
         k = bisect_right(hits, prev)
         if k == len(hits) or (prev >= 0 and hits[k] - prev > config.VERIFY_MAX_ROW_JUMP):
             own.append(None)
@@ -316,12 +375,23 @@ def _rest_of_line(row, c, plain):
         i = have.find(n)
         if i >= 0:
             rest = have[i + len(n):]
+            # numbers side by side run together (7.8280 78.28 is 782807828), so every way of taking them off is tried
+            if _all_held(rest, [h for h in held if h], {}):
+                return ""
             cut = True
             while rest and cut:
                 cut = max((h for h in held if h and rest.startswith(h)), key=len, default="")
                 rest = rest[len(cut):]
             return rest
     return None
+
+
+def _all_held(rest, held, seen):
+    if not rest:
+        return True
+    if rest not in seen:
+        seen[rest] = any(rest.startswith(h) and _all_held(rest[len(h):], held, seen) for h in held)
+    return seen[rest]
 
 
 def _line_end_columns(rows, rcols, plain, own):

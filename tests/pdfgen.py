@@ -236,7 +236,8 @@ CTN_X, PCS_X = 410, 428
 def smo_po(orders):
     # each item over four lines: its number alone, then its FC- code, its barcode, and the description with the amounts;
     # cartons and pieces print the quantity in the same way, only under a different column;
-    # a store name given as several lines is printed wrapped, and an order may name the address line under it
+    # a store name given as several lines is printed wrapped, and an order may name the address line under it;
+    # an item may print its code another way ("printed"), leave it out of the description ("bare"), or carry a line under it ("under")
     pages, rows = [], []
     for d, (po, printed, items, *address) in enumerate(orders):
         printed = [printed] if isinstance(printed, str) else list(printed)
@@ -248,16 +249,20 @@ def smo_po(orders):
                text(40, 690, "No Art/MCode SKU Description Cost Price UOM Qty FOC Gross Nett"),
                text(CTN_X, 678, "Ctn"), text(PCS_X, 678, "Pcs"), text(470, 678, "Amount"), text(520, 678, "Amount")]
         y = 660
-        for n, (code, bar, desc, price, uom, qty, unit) in enumerate(items, 1):
+        for n, (code, bar, desc, price, uom, qty, unit, *more) in enumerate(items, 1):
+            opts = more[0] if more else {}
             amount = f"{float(price) * int(qty):.2f}"
-            ops += [text(40, y, str(n)), text(60, y - 12, f"FC-{code}"), text(60, y - 24, bar), text(60, y - 36, f"{code} {desc}"),
+            sku = desc if opts.get("bare") else f"{code} {desc}"
+            ops += [text(40, y, str(n)), text(60, y - 12, opts.get("printed", f"FC-{code}")), text(60, y - 24, bar), text(60, y - 36, sku),
                     text(320, y - 36, price), text(370, y - 36, uom), text(CTN_X if unit == "ctn" else PCS_X, y - 36, qty),
                     text(470, y - 36, amount), text(520, y - 36, amount)]
+            if opts.get("under"):
+                ops.append(text(60, y - 48, opts["under"]))
             rows.append({"_doc": d, "PO No.": po, "Store Code": store, "No": str(n), "Item Code": code, "Barcode": bar,
-                         "SKU Description": f"{code} {desc}", "Unit Price": price, "UOM": uom,
+                         "SKU Description": sku, "Unit Price": price, "UOM": uom,
                          "Qty Ctn": qty if unit == "ctn" else "", "Qty Pcs": qty if unit == "pcs" else "",
                          "Gross Amount": amount, "Nett Amount": amount})
-            y -= 50
+            y -= 62 if opts.get("under") else 50
         pages.append(ops)
     return build(pages), {"columns": [{"name": n, "kind": k} for n, k in SMO_COLUMNS], "rows": rows}
 
@@ -280,6 +285,18 @@ SMO_NEW = [("HQ292390", "SMO Bookstores Raub",
             [("178330", "281485140000", "FABER-CASTELL 30CM STRAIGHT RULER", "41.4800", "B0020", "3", "pcs"),
              ("584803", "281900140000", "3P FC SINGLE HOLE SHARPENER PASTEL", "29.3000", "B0010", "6", "ctn"),
              ("100028295", "282066040000", "FC DESKTOP SHARPENER ANGLE", "23.7600", "PCS", "7", "ctn")])]
+
+SMO_BRANDS = [("HQ292281", "SMO Bookstores East Coast Mall (ECM)",
+               [("187054", "280125810000", "FC TACK-IT 50G WHITE/GREEN", "90.6000", "B0025", "1", "ctn"),
+                ("90-043-570", "282479130000", "UHU ALL PURPOSE TWIST & GLUE 35ML", "99.9600", "B0012", "1", "ctn", {"printed": "UHU-90-043-570", "bare": True}),
+                ("97-033-510", "282676660000", "UHU WHITE GLUE 39ML", "19.4392", "B0012", "1", "ctn", {"printed": "UHU 97-033-510", "bare": True}),
+                ("90-000-015", "280124100000", "UHU STIC 8.2G RENATURE", "66.0017", "B0024", "1", "ctn", {"printed": "UHU-90-000-015", "under": "40267609"}),
+                ("90-036-355", "282566760000", "UHU MAX REPAIR 8G", "112.8000", "B0010", "1", "ctn", {"printed": "UHU-90-036-355", "bare": True})]),
+              ("HQ292282", "SMO Bookstores Taman Tas",
+               [("187079", "282690530000", "FC TACK-IT WHITE 30G", "63.9300", "B0025", "2", "ctn", {"bare": True}),
+                ("90-000-015", "280124100000", "UHU STIC 8.2G RENATURE", "66.0017", "B0024", "1", "ctn", {"printed": "UHU-90-000-015", "under": "40267609"}),
+                ("97-033-515", "282676670000", "UHU WHITE GLUE 122ML", "41.0380", "B0012", "1", "ctn", {"printed": "UHU 97-033-515", "bare": True}),
+                ("90-040-759", "281296050000", "UHU 35ML ALL PURPOSE NO 13", "59.8800", "B0010", "2", "ctn", {"printed": "UHU-90-040-759"})])]
 
 
 def purchase_orders(orders=6, pages_per_order=4, items_per_page=12):

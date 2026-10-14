@@ -161,8 +161,8 @@ def test_an_emailed_file_that_does_not_fit_is_not_guessed_and_says_why(client, f
     monkeypatch.setattr(llm, "get_llm", lambda: model)
     pdf, _ = pdfgen.becon_po(pdfgen.NEW_ITEMS, header_extra="Discount")
     d = convert(pdf, "po-new-layout.pdf")
-    assert d["stage"] == "failed" and model.calls == 0 and not d["table"]
-    assert (format_name(fake_db, d), d["error"]) == ("BECON", 'BECON, header changed: new column "Discount"; open it in Profile Builder')
+    assert d["stage"] == "not_read" and model.calls == 0 and not d["table"]
+    assert (format_name(fake_db, d), d["error"]) == ("BECON", "it doesn't fully fit BECON (header changed: new column \"Discount\")")
 
 
 def test_a_read_that_fails_the_checks_is_never_sent_out(client, fake_db, trained, monkeypatch):
@@ -178,7 +178,7 @@ def test_a_read_that_fails_the_checks_is_never_sent_out(client, fake_db, trained
     monkeypatch.setattr(layout, "read_table", misread)
     pdf, _ = pdfgen.becon_po(pdfgen.NEW_ITEMS)
     d = convert(pdf, "po.pdf")
-    assert model.calls == 0 and d["stage"] == "failed" and d["read_note"] == "layout changed: 1 value didn't check out"
+    assert model.calls == 0 and d["stage"] == "not_read" and d["read_note"] == "layout changed: 1 value didn't check out"
 
 
 def test_a_format_learns_from_its_confirmed_files_the_first_time_it_is_used(fake_db, trained):
@@ -374,7 +374,8 @@ def test_re_read_with_current_format_uses_the_layout_and_never_the_model(client,
     client.post(f"/api/docs/{did}/reread")
     from conftest import wait_for
     env = wait_for(lambda: (e := client.get(f"/api/docs/{did}").get_json())["doc"]["stage"] != "rereading" and e)
-    assert model.calls == 0 and env["doc"]["reread_error"] is None and env["doc"]["can_undo_reread"]
+    assert model.calls == 0 and env["doc"]["reread_error"] is None
+    assert env["doc"]["reread_changes"] == "nothing changed" and not env["doc"]["can_undo_reread"]
     assert len(env["table"]["rows"]) == len(want["rows"])
 
 

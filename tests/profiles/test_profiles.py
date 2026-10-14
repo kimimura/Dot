@@ -54,3 +54,16 @@ def test_column_lists_are_not_kept_as_hints():
     assert not hint_rules.useful_hint("The columns are PO No, Date, Item Code and Quantity", cols)
     assert not hint_rules.useful_hint("PO No, Date, Item Code", cols)
     assert not hint_rules.useful_hint("", cols)
+
+
+def test_a_format_s_instructions_live_in_its_columns_and_this_file_s_chat_hint_comes_first():
+    from modules.reading import prompts
+    p = {"name": "ACME", "columns": [{"name": "Date", "kind": "doc", "hint": "Extract the order date"}], "examples": []}
+    text = prompts.profile_prompt(p, [{"scope": "col", "col": "Date", "text": "Extract the delivery date"}, {"scope": "profile", "text": "A general rule"}])
+    assert "Extract the delivery date" in text and "Extract the order date" not in text and "A general rule" not in text and "Rules learned" not in text
+
+
+def test_a_confirmed_sheet_is_the_format_so_a_split_column_leaves_it():
+    existing = [{"name": n, "kind": "row", "seen": 1, "hint": "", "aliases": []} for n in ("Item", "Description", "Qty")]
+    confirmed = [{"name": n, "kind": "row"} for n in ("Item", "Brand", "Desc", "Qty")]
+    assert [c["name"] for c in learning.merge_columns(existing, confirmed, [])] == ["Item", "Brand", "Desc", "Qty"]

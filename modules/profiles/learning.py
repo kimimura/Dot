@@ -1,6 +1,5 @@
 import config
-from core import db
-from modules.profiles import hints, repository
+from modules.profiles import repository
 
 
 def learn(conn, p, doc, table, doc_hints, tokens, structural, signature):
@@ -22,8 +21,6 @@ def learn(conn, p, doc, table, doc_hints, tokens, structural, signature):
     p["fingerprint"] = fp
 
     p["columns"] = merge_columns(p["columns"], table["columns"], doc_hints, bump=first_time)
-    p["hints"] = hints.merge_hints(p["hints"], [h for h in doc_hints if h.get("scope") != "col"],
-                             [c["name"] for c in table["columns"]])
     ex = {"doc_id": doc["id"], "columns": [c["name"] for c in table["columns"]],
           "rows": [{k: v for k, v in r.items() if not k.startswith("_")} for r in table["rows"][:3]]}
     p["examples"] = ([ex] + [e for e in p["examples"] if e.get("doc_id") != doc["id"]])[:config.PROFILE_MAX_EXAMPLES]
@@ -54,10 +51,5 @@ def merge_columns(existing, confirmed, hints, bump=True):
                 al.append(a)
         prev["aliases"] = al[:10]
         out.append(prev)
-    alias_names = {a.lower() for c in out for a in c.get("aliases", [])}
-    by_name = {k: v for k, v in by_name.items() if k not in alias_names}
-    dropped = {str(h["col"]).lower() for h in hints if h.get("scope") == "col" and h.get("dropped") and h.get("col")}
-    for k, c in by_name.items():
-        if k not in dropped:
-            out.append(c)
+    # a confirmed sheet is the format: a column it no longer has (split, merged, renamed or dropped) leaves the format
     return out

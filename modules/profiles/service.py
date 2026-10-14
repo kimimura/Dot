@@ -5,8 +5,9 @@ from core import db
 from core.errors import Refused
 from modules.documents import repository as documents
 from modules.profiles import matching, repository as profiles
+from modules.reading import layout
 
-VIEW_KEYS = ("id", "name", "created_at", "updated_at", "columns", "hints", "signature")
+VIEW_KEYS = ("id", "name", "created_at", "updated_at", "columns", "signature")
 
 
 def view(conn, p, with_docs=False):
@@ -67,11 +68,6 @@ def _clean_columns(raw):
     return cols
 
 
-def _clean_rules(raw):
-    return [{"text": str(h.get("text", "")).strip()[:config.PROFILE_RULE_MAX_CHARS], "added_at": h.get("added_at") or db.now()}
-            for h in raw if str(h.get("text", "")).strip()]
-
-
 def update(pid, body):
     conn = db.connect()
     p = profiles.get(conn, pid)
@@ -87,8 +83,11 @@ def update(pid, body):
         p["name"] = name
     if "columns" in body and isinstance(body["columns"], list):
         p["columns"] = _clean_columns(body["columns"])
-    if "hints" in body and isinstance(body["hints"], list):
-        p["hints"] = _clean_rules(body["hints"])
+        had = {c["name"] for c in profiles.get(conn, pid)["columns"]}
+        for c in body["columns"]:
+            was, now = str(c.get("was") or ""), str(c.get("name", "")).strip()
+            if was in had and now and was != now:
+                p["layout"] = layout.rename(p.get("layout"), was, now)
     # saving a format here is an edit like confirming a file for it: it becomes the format edited last
     profiles.save(conn, p, edited=True)
     conn.commit()

@@ -111,13 +111,13 @@ class FakeDb:
         info = pdftext.inspect(pdf_bytes)
         p = {"id": db.new_id(), "name": name, "columns": [{"name": c, "kind": k, "seen": 1} for c, k in columns],
              "fingerprint": {"tokens": {w: 1 for w in info.tokens}, "n_docs": 1, "structural": info.structural},
-             "hints": [], "examples": [], "signature": {}, "created_at": db.now(), "updated_at": db.now()}
+             "examples": [], "signature": {}, "created_at": db.now(), "updated_at": db.now()}
         self.profiles[p["id"]] = p
         return p
 
     def create_profile(self, conn, name, columns=None, signature=None):
         p = {"id": db.new_id(), "name": name.strip(), "columns": columns or [],
-             "fingerprint": {"tokens": {}, "n_docs": 0, "structural": {}}, "hints": [], "examples": [], "signature": signature or {},
+             "fingerprint": {"tokens": {}, "n_docs": 0, "structural": {}}, "examples": [], "signature": signature or {},
              "created_at": db.now(), "updated_at": db.now(), "layout": None}
         self.profiles[p["id"]] = p
         return copy.deepcopy(p)

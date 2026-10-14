@@ -7,7 +7,6 @@ def _row_to_profile(r):
         "created_at": r["created_at"], "updated_at": r["updated_at"],
         "columns": db.loads(r["columns_json"], []),
         "fingerprint": db.loads(r["fingerprint_json"], {}),
-        "hints": db.loads(r["hints_json"], []),
         "examples": db.loads(r["examples_json"], []),
         "signature": db.loads(r["signature_json"], {}),
         "layout": db.loads(r.get("layout_json"), None),
@@ -46,9 +45,9 @@ def save(conn, p, edited=False):
     if edited:
         p["updated_at"] = db.now()
     conn.execute(
-        "UPDATE profiles SET name=?, updated_at=?, columns_json=?, fingerprint_json=?, hints_json=?,"
+        "UPDATE profiles SET name=?, updated_at=?, columns_json=?, fingerprint_json=?,"
         " examples_json=?, signature_json=?, layout_json=? WHERE id=?",
-        (p["name"], p["updated_at"], db.dumps(p["columns"]), db.dumps(p["fingerprint"]), db.dumps(p["hints"]),
+        (p["name"], p["updated_at"], db.dumps(p["columns"]), db.dumps(p["fingerprint"]),
          db.dumps(p["examples"]), db.dumps(p["signature"]), db.dumps(p.get("layout")), p["id"]),
     )
 

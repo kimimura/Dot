@@ -2,7 +2,7 @@ import { esc } from "./dom.js";
 
 export function stageLabel(s) {
   return { queued: "queued", converting: "converting", converted: "converted", rereading: "re-reading", identify: "waiting for you", pick: "choose a format", extracting: "reading", review: "review", revising: "revising", confirm_ops: "confirm?",
-           save_ask: "save?", naming: "naming", pick_existing: "choose a profile", confirmed: "confirmed", failed: "failed", duplicate: "duplicate?" }[s] || s;
+           save_ask: "save?", naming: "naming", pick_existing: "choose a profile", confirmed: "confirmed", failed: "failed", not_read: "not read", duplicate: "duplicate?" }[s] || s;
 }
 
 const SOURCES = { email: "Email", upload: "Upload", builder: "Profile Builder" };
@@ -13,9 +13,9 @@ export function confirmedTag(d) {
   return d.stage === "confirmed" && d.profile_name ? `<span class="teach-tag" title="Confirmed for ${esc(d.profile_name)}">confirmed</span>` : "";
 }
 
-// a finished file shows where it came in; one still in progress, or failed, shows how far it got
+// a finished file shows where it came in; one still in progress, not read yet, or failed, shows how far it got
 export function sourcePill(source, stage, sender) {
-  const cls = DONE.includes(stage) ? "s-ok" : stage === "failed" ? "s-fail" : "s-held";
+  const cls = DONE.includes(stage) ? "s-ok" : stage === "failed" ? "s-fail" : stage === "not_read" ? "s-recv" : "s-held";
   const text = DONE.includes(stage) ? SOURCES[source] || "—" : stageLabel(stage);
   return `<span class="st ${cls}"${sender ? ` title="From ${esc(sender)}"` : ""}><span class="d"></span>${esc(text)}</span>`;
 }

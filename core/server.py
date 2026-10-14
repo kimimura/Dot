@@ -41,4 +41,5 @@ def run(app, on_start=()):
     if ai.read_models() and ai.read_models() != ai.models():
         print(f"  reading  {ai.status()}: {ai.read_models()}")
     print(f"  database {db.where()} - {ready}")
-    serve(app, host=config.HOST, port=config.PORT, threads=config.SERVER_THREADS)
+    # an upload over the limit is cut off as it arrives, before anything is stored or the token is checked
+    serve(app, host=config.HOST, port=config.PORT, threads=config.SERVER_THREADS, max_request_body_size=config.REQUEST_MAX_BYTES)

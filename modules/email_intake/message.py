@@ -13,7 +13,7 @@ def _safe(name):
 def _label(doc):
     if doc["stage"] == "converted":
         return doc.get("profile_name") or config.EMAIL_UNIDENTIFIED
-    return config.EMAIL_UNREADABLE if doc["stage"] == "failed" else config.EMAIL_UNFINISHED
+    return config.EMAIL_UNREADABLE if doc["stage"] in ("failed", "not_read") else config.EMAIL_UNFINISHED
 
 
 def _file_names(docs, labels, stamp):

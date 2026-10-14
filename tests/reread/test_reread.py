@@ -130,3 +130,13 @@ def test_the_ordering_filter_keeps_reading_hints():
             "Take the first number on the line", "Use the delivery date, not the order date"]
     assert all(hint_rules.about_order(t) for t in blocked)
     assert not any(hint_rules.about_order(t) for t in kept)
+
+
+def test_a_re_read_says_what_it_changed():
+    from modules.conversion import reread
+    old = {"columns": [{"name": "Item"}, {"name": "Qty"}], "rows": [{"Item": "187054", "Qty": "1"}, {"Item": "187079", "Qty": "2"}]}
+    new = {"columns": [{"name": "Item"}, {"name": "Qty"}], "rows": [{"Item": "FC-187054", "Qty": "1"}, {"Item": "FC-187079", "Qty": "2"}]}
+    assert reread.changes(old, new) == '"Item" changed in 2 of 2 rows'
+    assert reread.changes(old, old) == "nothing changed"
+    more = {"columns": new["columns"] + [{"name": "UOM"}], "rows": new["rows"] + [{"Item": "A", "Qty": "3", "UOM": "PCS"}]}
+    assert reread.changes(old, more) == '"UOM" added; 3 rows instead of 2; "Item" changed in 2 of 2 rows'

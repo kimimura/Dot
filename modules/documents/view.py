@@ -45,11 +45,13 @@ def options_for(conn, d):
         return [{"id": "new_upload", "label": "Upload another", "primary": True}, {"id": "revise", "label": "Revise this one"}], "none"
     if st == "failed":
         return [{"id": "retry", "label": "Try again", "primary": True}], "none"
+    if st == "not_read":
+        return [{"id": "retry", "label": "Read it here", "primary": True}], "none"
     return [], "none"
 
 
 STATE_FOR = {"identify": "asking", "pick": "asking", "pick_existing": "asking", "duplicate": "asking", "review": "asking", "confirm_ops": "asking",
-             "revising": "asking", "save_ask": "asking", "naming": "asking", "confirmed": "happy", "failed": "confused",
+             "revising": "asking", "save_ask": "asking", "naming": "asking", "confirmed": "happy", "failed": "confused", "not_read": "asking",
              "extracting": "reading"}
 
 
@@ -74,7 +76,7 @@ def envelope(conn, d, changes=None):
             "can_undo": bool(d.get("history")), "hints": d.get("hints", []), "extra_fields": d.get("extra_fields") or {},
             "signature": d.get("signature") or {},
             "reread_from": d.get("reread_from"), "reread_at": d.get("reread_at"), "reread_error": d.get("reread_error"),
-            "can_undo_reread": bool(d.get("before_reread")), "read_note": d.get("read_note"),
+            "can_undo_reread": bool(d.get("before_reread")), "reread_changes": d.get("reread_changes"), "read_note": d.get("read_note"),
         },
         "table": table_view(d),
         "bot": {"say": last_bot["text"] if last_bot else dialogue.say("welcome"), "state": STATE_FOR.get(d["stage"], "idle"),

@@ -8,14 +8,14 @@ STATE_DEFAULTS = {
     "tokens": [], "structural": {}, "signature": {}, "table": None, "verification": None,
     "hints": [], "history": [], "transcript": [], "candidates": [], "pending_profile_id": None,
     "pending_name": None, "rejected_profile_ids": [], "extra_fields": {}, "duplicate_of": None, "pending": None,
-    "reread_from": None, "reread_at": None, "reread_error": None, "before_reread": None,
+    "reread_from": None, "reread_at": None, "reread_error": None, "before_reread": None, "reread_changes": None,
 }
 # the conversation lives in its own table; everything else is kept in the document's saved state
 STATE_KEYS = [k for k in STATE_DEFAULTS if k != "transcript"]
 MESSAGE_FIELDS = ("who", "text", "at")
 DOC_FIELDS = ("id, filename, sha256, size, n_pages, uploaded_at, confirmed_at, stage, error, profile_id, has_text_layer,"
               " n_rows, verified_pct, state_json, submission_id, position, auto_how, read_note")
-UNFINISHED = ("identify", "pick", "extracting", "review", "revising", "confirm_ops", "save_ask", "naming", "pick_existing", "failed", "duplicate")
+UNFINISHED = ("identify", "pick", "extracting", "review", "revising", "confirm_ops", "save_ask", "naming", "pick_existing", "failed", "not_read", "duplicate")
 
 
 def _row_to_doc(r):

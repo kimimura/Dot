@@ -29,7 +29,7 @@ def convert(conn, d, pdf):
         return _finish(conn, d, "same file as before, result reused")
     tried = [p for p in (profiles.get(conn, pid) for pid in possible_formats(conn, d)) if p]
     if not tried:
-        return _not_read(d, "scanned, no text to read" if not d["has_text_layer"] else "unknown format")
+        return _not_read(d, "it's a scan, with no text to read" if not d["has_text_layer"] else "no saved format matches it")
     texts = pdftext.page_texts(pdf)
     fits, misses = [], []
     for prof in tried:
@@ -38,7 +38,7 @@ def convert(conn, d, pdf):
     if not fits:
         prof, _, _, note = misses[0]
         d["profile_id"], d["read_note"] = prof["id"], note
-        return _not_read(d, f"{prof['name']}, {note or 'layout not learned yet'}")
+        return _not_read(d, f"it doesn't fully fit {prof['name']} ({note or 'layout not learned yet'})")
     # formats that both read the file perfectly can't be told apart by what is printed: the one taught last wins
     prof, table, ver, _ = max(fits, key=lambda f: f[0].get("updated_at") or "")
     if len(fits) > 1:
@@ -49,8 +49,10 @@ def convert(conn, d, pdf):
 
 
 def _not_read(d, why):
+    # nothing went wrong: the file needs teaching first, so it waits for Profile Builder instead of getting a guessed sheet
     activity.note(f"Not read: {d['filename']}: {why}; open it in Profile Builder")
-    d["stage"], d["error"] = "failed", f"{why}; open it in Profile Builder"
+    d["stage"], d["error"] = "not_read", why
+    transcript.bot(d, "not_read", why=why)
     return d
 
 

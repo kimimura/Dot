@@ -19,14 +19,14 @@ def test_an_emailed_file_of_an_unknown_format_is_not_read_and_says_where_to_teac
     asked = []
     monkeypatch.setattr(OfflineAdapter, "complete", lambda self, *a, **k: asked.append(a))
     d = convert(acme_pdf)
-    assert d["stage"] == "failed" and d["error"] == "unknown format; open it in Profile Builder" and not d["table"] and asked == []
+    assert d["stage"] == "not_read" and d["error"] == "no saved format matches it" and not d["table"] and asked == []
 
 
 def test_an_emailed_file_that_doesnt_fit_its_layout_is_not_guessed(client, fake_db, acme_pdf, acme2_pdf, monkeypatch):
     teach(client, acme_pdf, "ACME")
     monkeypatch.setattr(reading, "read_direct", lambda conn, d, prof, texts: (None, None, 'layout changed: "Qty" not found in 1 row'))
     d = convert(acme2_pdf)
-    assert d["stage"] == "failed" and d["error"] == 'ACME, layout changed: "Qty" not found in 1 row; open it in Profile Builder'
+    assert d["stage"] == "not_read" and d["error"] == "it doesn't fully fit ACME (layout changed: \"Qty\" not found in 1 row)"
 
 
 def test_the_same_file_twice_reuses_the_first_result(client, fake_db, acme_pdf):
@@ -74,5 +74,29 @@ def test_of_two_formats_that_look_alike_the_one_whose_layout_fits_is_used(fake_d
 def test_editing_a_format_on_the_profiles_page_makes_it_the_one_edited_last(client, fake_db, acme_pdf, acme2_pdf):
     first = twin(fake_db, "ECONSAVE", acme_pdf, ["Invoice No", "Item", "Qty", "Price"], "2026-10-08T10:00:00")
     twin(fake_db, "ECONSAVE2", acme_pdf, ["Invoice No", "Customer", "Item", "Description", "Qty", "Price"], "2026-10-08T11:00:00")
-    assert client.put(f"/api/profiles/{first['id']}", json={"hints": [{"text": "Use the delivery date"}]}).status_code == 200
+    assert client.put(f"/api/profiles/{first['id']}", json={"columns": [{**c, "hint": "Extract the delivery date"} for c in first["columns"]]}).status_code == 200
     assert format_name(fake_db, convert(acme2_pdf)) == "ECONSAVE"
+
+
+def test_a_database_out_of_reach_while_reading_tries_the_file_again_instead_of_failing_it(fake_db, acme_pdf, monkeypatch):
+    from core import db
+    from modules.conversion import convert as conversion, queue
+    later = []
+    monkeypatch.setattr(queue.threading, "Timer", lambda s, fn: type("T", (), {"start": lambda self: later.append(fn)})())
+    monkeypatch.setattr(conversion, "convert", lambda *a: (_ for _ in ()).throw(db.Unreachable("network down")))
+    d = convert(acme_pdf)
+    assert d["stage"] == "converting" and not d.get("error") and len(later) == 1
+
+
+def test_only_the_copy_of_dot_that_takes_email_picks_up_unfinished_files(fake_db, monkeypatch):
+    import config
+    from modules.conversion import queue
+    picked = []
+    monkeypatch.setattr(queue, "enqueue", picked.append)
+    monkeypatch.setattr(queue.documents, "pending", lambda conn: ["a", "b"])
+    monkeypatch.setattr(config, "EMAIL_INTAKE_TOKEN", "")
+    queue.resume_pending()
+    assert picked == []
+    monkeypatch.setattr(config, "EMAIL_INTAKE_TOKEN", "secret")
+    queue.resume_pending()
+    assert picked == ["a", "b"]

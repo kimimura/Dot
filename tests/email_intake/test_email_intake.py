@@ -106,7 +106,7 @@ def test_results_still_go_out_after_a_restart(client, fake_db, sent, monkeypatch
     watch = service._watch
     monkeypatch.setattr(service, "_watch", lambda rid: None)
     send(client, [{"filename": "a.pdf", "content": b64(acme_pdf)}])
-    wait_for(lambda: all(d["stage"] in ("converted", "failed") for d in fake_db.docs.values()))
+    wait_for(lambda: all(d["stage"] in ("converted", "not_read", "failed") for d in fake_db.docs.values()))
     assert not sent and only_email(fake_db)["status"] == "waiting"
     monkeypatch.setattr(service, "_watch", watch)
     monkeypatch.setattr(config, "EMAIL_INTAKE_TOKEN", "")
@@ -138,5 +138,19 @@ def test_the_terminal_shows_what_happens_to_an_email(client, fake_db, sent, monk
     assert lines[0] == "Email from sender@example.com: 2 PDFs"
     assert "Reading a.pdf" in lines and "Reading c.pdf" in lines
     assert "Done: a.pdf: ACME, fast read, 1 row, 100% checked" in lines
-    assert "Not read: c.pdf: unknown format; open it in Profile Builder" in lines
+    assert "Not read: c.pdf: no saved format matches it; open it in Profile Builder" in lines
     assert lines[-1] == 'Reply sent to sender@example.com: "2 PDFs Received"'
+
+
+def test_a_database_out_of_reach_for_a_moment_is_waited_for_so_the_reply_still_goes(monkeypatch):
+    from core import db
+    from modules.email_intake import delivery
+    tries = []
+    monkeypatch.setattr(delivery.time, "sleep", lambda s: None)
+
+    def flaky():
+        tries.append(1)
+        if len(tries) < 3:
+            raise db.Unreachable("network down")
+        return "done"
+    assert delivery._patient(flaky) == "done" and len(tries) == 3

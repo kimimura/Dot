@@ -71,6 +71,7 @@ views.doc = async function (id) {
           : (d.stage === "queued" || d.stage === "converting" || d.stage === "rereading") ? "" : `<a class="btn primary" href="#/builder/${d.id}">Continue</a>`}
         <button class="btn danger" id="del-btn">${ICON.trash}</button></div></div>
     ${rereadNote(d, env.progress)}
+    ${d.stage === "not_read" ? `<div class="note">${ICON.file}<div>Not read: ${esc(d.error || "")}. Continue in Profile Builder: it's read there, you fix and confirm, and the format learns it.</div></div>` : ""}
     ${d.read_note && d.stage === "converted" ? `<div class="note">${ICON.file}<div>Format: <b>${esc(d.profile_name || "")}</b> · ${esc(d.read_note)}. Review it in Profile Builder and confirm it to teach the new layout.</div></div>` : ""}
     <div class="panel"><div class="doc-tabs">${tabs.map(([t, label], i) => `<button class="doc-tab${i ? "" : " on"}" data-t="${t}">${label}</button>`).join("")}
         <a class="btn small tab-dl" id="tab-dl" href="${tabs[0][2]}">${ICON.dl}Download</a></div>
@@ -137,7 +138,11 @@ function rereadNote(d, progress) {
     const pct = progress && progress.of ? ` ${Math.round(100 * progress.done / progress.of)}%` : "";
     return `<div class="note" id="reread-note">${ICON.file}<div>Re-reading with the current ${fmt} format…<span class="pct">${pct}</span> The sheet below is the previous one until it finishes.</div></div>`;
   }
-  if (d.reread_error) return `<div class="note f">${ICON.file}<div>Re-read failed: ${esc(d.reread_error)}. The previous sheet is unchanged.</div></div>`;
+  if (d.reread_error) return `<div class="note f">${ICON.file}<div>Not re-read: ${esc(d.reread_error)}. The previous sheet is unchanged.</div></div>`;
+  if (d.reread_at && d.reread_changes) {
+    const undo = d.can_undo_reread ? ` <button class="btn small" id="undo-reread-btn">Undo re-read</button>` : "";
+    return `<div class="note">${ICON.file}<div>Re-read with the current ${fmt} format ${ago(d.reread_at)}: ${esc(d.reread_changes)}.${undo}</div></div>`;
+  }
   if (d.can_undo_reread) return `<div class="note">${ICON.file}<div>Re-read with the current ${fmt} format ${ago(d.reread_at)}. <button class="btn small" id="undo-reread-btn">Undo re-read</button></div></div>`;
   return "";
 }

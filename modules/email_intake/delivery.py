@@ -47,21 +47,31 @@ def _send(payload):
     return "failed", error
 
 
-def run(rid):
+def _patient(fn, *args):
+    # a database that is briefly out of reach (network, VPN) is waited for, so an email still gets its reply
+    said = False
+    deadline = time.time() + config.EMAIL_MAX_WAIT_SECONDS
+    while True:
+        try:
+            return fn(*args)
+        except Exception as e:
+            if not (isinstance(e, db.Unreachable) or db.lost(e)) or time.time() > deadline:
+                raise
+            if not said:
+                activity.note(f"Database out of reach, waiting to finish an email: {e}")
+                said = True
+            time.sleep(config.EMAIL_POLL_SECONDS)
+
+
+def _request(rid):
     conn = db.connect(tries=3)
     try:
-        req = submissions.get(conn, rid)
+        return submissions.get(conn, rid)
     finally:
         conn.close()
-    if not req or req["source"] != "email" or req["status"] != "waiting":
-        return
-    deadline = time.time() + config.EMAIL_MAX_WAIT_SECONDS
-    while not _finished(rid) and time.time() < deadline:
-        time.sleep(config.EMAIL_POLL_SECONDS)
-    docs = _results(rid)
-    payload = message.build(docs, req["stamp"], req["sender"])
-    status, error = _send(payload)
-    activity.note(f'Reply sent to {req["sender"]}: "{payload["subject"]}"' if status == "sent" else f"Reply to {req['sender']} failed: {error}")
+
+
+def _record(rid, docs, status, error):
     conn = db.connect(tries=3)
     try:
         submissions.finish(conn, rid, status, error)
@@ -73,3 +83,18 @@ def run(rid):
         conn.commit()
     finally:
         conn.close()
+
+
+def run(rid):
+    req = _patient(_request, rid)
+    if not req or req["source"] != "email" or req["status"] != "waiting":
+        return
+    deadline = time.time() + config.EMAIL_MAX_WAIT_SECONDS
+    while not _patient(_finished, rid) and time.time() < deadline:
+        time.sleep(config.EMAIL_POLL_SECONDS)
+    docs = _patient(_results, rid)
+    payload = message.build(docs, req["stamp"], req["sender"])
+    status, error = _send(payload)
+    activity.note(f'Reply sent to {req["sender"]}: "{payload["subject"]}"' if status == "sent" else f"Reply to {req['sender']} failed: {error}")
+    # once sent, the record of it is kept trying for, so a restart never sends the same reply again
+    _patient(_record, rid, docs, status, error)
